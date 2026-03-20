@@ -12,8 +12,13 @@
 package gui
 
 import (
+	"encoding/csv"
 	"fmt"
 	"image/color"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -246,7 +251,7 @@ func NewAppState(cfg *config.Config) *AppState {
 		Config:             cfg,
 		Devices:            make([]*models.Miner, 0),
 		Workers:            make([]Worker, 0),
-		SelectedIndex:      0,
+		SelectedIndex:      -1,
 	}
 }
 
@@ -260,7 +265,7 @@ func (s *AppState) SetDefaults() {
 	s.DailyBTC.Set(0.00027945)
 	s.DailyProfit.Set(-16.96)
 	s.MonthlyProfit.Set(-508.73)
-	s.LastUpdate.Set(time.Now().Format("3:04:05 PM"))
+	s.LastUpdate.Set(time.Now().Format("3:06:09 PM"))
 
 	s.SelectedHashrate.Set(122.1)
 	s.SelectedTemp.Set(74.2)
@@ -385,7 +390,7 @@ func NewDashboard(cfg *config.Config, apiClient *api.Client, frpClient *frp.Clie
 // Run يشغل التطبيق
 // ينشئ واجهة المستخدم، يبدأ التحديث التلقائي ويعرض النافذة.
 func (d *DashboardApp) Run() {
-	content := d.buildUI()
+	content := d.buildUI(d.State.Config.ApplicationName, d.State.Config.FarmUUID)
 	d.Window.SetContent(content)
 	d.startAutoRefresh()
 
@@ -422,7 +427,7 @@ func (d *DashboardApp) Run() {
 
 // buildUI يبني واجهة المستخدم
 // يجمع قائمة الأجهزة، المحتوى الرئيسي، الرأس والتذييل في تخطيط واحد.
-func (d *DashboardApp) buildUI() fyne.CanvasObject {
+func (d *DashboardApp) buildUI(application_name string, farm_uuid string) fyne.CanvasObject {
 
 	deviceList := d.createDeviceList()
 	content := d.createMainContent()
@@ -431,7 +436,7 @@ func (d *DashboardApp) buildUI() fyne.CanvasObject {
 	split.SetOffset(0.15) // Device list takes 15% of width
 
 	// Wrap in border layout with header
-	header := d.createHeader()
+	header := d.createHeader(application_name, farm_uuid)
 	footer := d.createFooter()
 
 	mainContainer := container.NewBorder(
@@ -447,9 +452,9 @@ func (d *DashboardApp) buildUI() fyne.CanvasObject {
 
 // createHeader creates the top header bar
 // يعرض الشعار والتبويبات وحالة الـ workspace في أعلى التطبيق.
-func (m *DashboardApp) createHeader() fyne.CanvasObject {
+func (m *DashboardApp) createHeader(application_name string, farm_uuid string) fyne.CanvasObject {
 	// Logo
-	logoText := canvas.NewText("⬡ MinerGate", colorYellow)
+	logoText := canvas.NewText("⬡ "+application_name, colorYellow)
 	logoText.TextSize = 20
 	logoText.TextStyle = fyne.TextStyle{Bold: true}
 
@@ -461,7 +466,7 @@ func (m *DashboardApp) createHeader() fyne.CanvasObject {
 	// )
 
 	// Workspace info
-	workspaceText := canvas.NewText("◉ Farm UUID: 12345678-90ab-cdef-1234-567890abcdef", colorTextSecondary)
+	workspaceText := canvas.NewText("◉ Farm UUID: "+farm_uuid, colorTextSecondary)
 	workspaceText.TextSize = 12
 
 	// Header container - وضع الشعار والمزرعة في نفس الصف مع مسافة شفافة
@@ -573,6 +578,16 @@ func (d *DashboardApp) createDeviceList() fyne.CanvasObject {
 		d.mu.RUnlock()
 	}
 
+	list.OnUnselected = func(id widget.ListItemID) {
+		d.mu.Lock()
+		d.State.SelectedIndex = -1
+		d.mu.Unlock()
+
+		d.mu.RLock()
+		d.updateSelectedDevice()
+		d.mu.RUnlock()
+	}
+
 	d.DeviceList = list
 
 	// Container
@@ -636,7 +651,6 @@ func (m *DashboardApp) createMainContent() fyne.CanvasObject {
 		metrics,
 		widget.NewSeparator(),
 		chart,
-		widget.NewSeparator(),
 		// workers,
 	)
 
@@ -654,6 +668,10 @@ func (m *DashboardApp) createMainContent() fyne.CanvasObject {
 // يجمع بطاقات المقاييس الرئيسية في شبكة منظمة.
 func (m *DashboardApp) createMetricsGrid() fyne.CanvasObject {
 	// Row 1: Hashrate, Miners, Efficiency, Power
+	m.State.Hashrate.Set(0.0)
+	m.State.Power.Set(0)
+	m.State.ActiveWorkers.Set(0)
+	m.State.OfflineDevices.Set(0)
 	row1 := container.NewGridWithColumns(4,
 		m.createMetricCard("Total Hashrate (5 min)", m.State.Hashrate, "TH/s", colorBlue),
 		m.createMetricCard("Total Power", m.State.Power, "W", colorOrange),
@@ -811,14 +829,32 @@ type ChartWidget struct {
 func (c *ChartWidget) UpdateData(newData []float64) {
 	c.data = newData
 	c.calculateRange()
-	c.Refresh()
+	fyne.Do(func() {
+		c.Refresh()
+	})
 }
 
 // createChartWidget creates a new chart widget
 func (m *DashboardApp) createChartWidget() fyne.CanvasObject {
 	var data []float64
-	if len(m.State.Devices) > 0 && m.State.SelectedIndex < len(m.State.Devices) {
-		data = m.State.Devices[m.State.SelectedIndex].Stats.HashrateHistory
+	if len(m.State.Devices) > 0 {
+		if m.State.SelectedIndex >= 0 && m.State.SelectedIndex < len(m.State.Devices) {
+			data = m.State.Devices[m.State.SelectedIndex].Stats.HashrateHistory
+		} else {
+			var maxLen int
+			for _, d := range m.State.Devices {
+				if len(d.Stats.HashrateHistory) > maxLen {
+					maxLen = len(d.Stats.HashrateHistory)
+				}
+			}
+			data = make([]float64, maxLen)
+			for _, d := range m.State.Devices {
+				offset := maxLen - len(d.Stats.HashrateHistory)
+				for i, h := range d.Stats.HashrateHistory {
+					data[offset+i] += h
+				}
+			}
+		}
 	} else {
 		data = m.State.HashrateHistory // fallback to global history
 	}
@@ -891,8 +927,10 @@ func (r *chartRenderer) Refresh() {
 	latest := r.widget.data[len(r.widget.data)-1]
 	minVal := r.widget.minVal
 	maxVal := r.widget.maxVal
-	r.chartText.Text = fmt.Sprintf("Latest: %.1f TH/s  (min: %.1f, max: %.1f)", latest, minVal, maxVal)
-	r.chartText.Color = colorTextPrimary
+	if latest != 0 {
+		r.chartText.Text = fmt.Sprintf("Latest: %.1f TH/s  (min: %.1f, max: %.1f)", latest, minVal, maxVal)
+		r.chartText.Color = colorTextPrimary
+	}
 }
 
 func (r *chartRenderer) Destroy() {}
@@ -967,6 +1005,11 @@ func (d *DashboardApp) syncDevices() {
 		return
 	}
 
+	existingDevices := make(map[string]*models.Miner)
+	for _, d := range d.State.Devices {
+		existingDevices[d.ID] = d
+	}
+
 	newDevices := make([]*models.Miner, 0, len(discovered))
 	for _, dev := range discovered {
 		miner := &models.Miner{
@@ -1006,6 +1049,25 @@ func (d *DashboardApp) syncDevices() {
 				miner.Stats.FanSpeeds = dev.Data.FanSpeeds
 			}
 		}
+
+		// Restore history and append current hashrate
+		if existing, found := existingDevices[miner.ID]; found {
+			miner.Stats.HashrateHistory = append([]float64(nil), existing.Stats.HashrateHistory...)
+		}
+		
+		// Only track if online
+		if miner.Status == "online" {
+			miner.Stats.HashrateHistory = append(miner.Stats.HashrateHistory, miner.Stats.Hashrate)
+		} else {
+			miner.Stats.HashrateHistory = append(miner.Stats.HashrateHistory, 0.0)
+		}
+
+		// Cap max history length for the chart
+		maxHistory := 288 // e.g. 24 hours at 5-min intervals
+		if len(miner.Stats.HashrateHistory) > maxHistory {
+			miner.Stats.HashrateHistory = miner.Stats.HashrateHistory[len(miner.Stats.HashrateHistory)-maxHistory:]
+		}
+
 		newDevices = append(newDevices, miner)
 	}
 	d.State.Devices = newDevices
@@ -1013,17 +1075,12 @@ func (d *DashboardApp) syncDevices() {
 	if d.DeviceCountStr != nil {
 		d.DeviceCountStr.Set(fmt.Sprintf("Total: %d", len(d.State.Devices)))
 	}
-
-	if d.DeviceList != nil {
-		d.DeviceList.Refresh()
-	}
 }
 
 // refreshData يحدث البيانات
 // يتم استدعاؤه من مؤقت التحديث لتحديث القيم العرضية وحفظ تزامن الواجهة.
 func (d *DashboardApp) refreshData() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	// تحديث الوقت
 	d.State.LastUpdate.Set(time.Now().Format("3:04:05 PM"))
@@ -1037,28 +1094,88 @@ func (d *DashboardApp) refreshData() {
 		if miner.Status == "online" {
 			totalHR += miner.Stats.Hashrate
 			totalPower += miner.Stats.Power
+			
+			// Log individual device hashrate
+			go func(ip string, hr float64) {
+				safeName := strings.ReplaceAll(ip, ".", "_")
+				safeName = strings.ReplaceAll(safeName, ":", "_")
+				filename := filepath.Join("device_log", fmt.Sprintf("%s.csv", safeName))
+				appendToCSV(filename, []string{time.Now().Format("2006-01-02 15:04:05"), strconv.FormatFloat(hr, 'f', 2, 64)})
+			}(miner.ID, miner.Stats.Hashrate)
 		}
 	}
 	d.State.TotalHashrate.Set(totalHR)
-	d.State.Hashrate.Set(totalHR)
-	d.State.Power.Set(totalPower)
+
+	// Log total hashrate
+	go func(hr float64) {
+		filename := filepath.Join("device_log", "total_hashrate.csv")
+		appendToCSV(filename, []string{time.Now().Format("2006-01-02 15:04:05"), strconv.FormatFloat(hr, 'f', 2, 64)})
+	}(totalHR)
 
 	// تحديث بيانات الجهاز المحدد
 	d.updateSelectedDevice()
 
 	// تحديث حسابات الأجهزة (مثلاً عندما تتغير حالة أحد الأجهزة)
 	d.State.UpdateDeviceCounts()
+	d.mu.Unlock()
+
+	if d.DeviceList != nil {
+		fyne.Do(func() {
+			d.DeviceList.Refresh()
+		})
+	}
 }
 
 // updateSelectedDevice يحدث بيانات الجهاز المحدد
 // يأخذ البيانات من الجهاز المحدد في القائمة ويعرضها في الواجهة.
 func (d *DashboardApp) updateSelectedDevice() {
 	// Assumes caller holds d.mu.RLock() or Lock()
-	if len(d.State.Devices) == 0 || d.State.SelectedIndex >= len(d.State.Devices) {
+	if len(d.State.Devices) == 0 {
+		return
+	}
+	
+	if d.State.SelectedIndex == -1 || d.State.SelectedIndex >= len(d.State.Devices) {
+		var totalHR float64
+		var totalPower int
+		var maxLen int
+
+		for _, miner := range d.State.Devices {
+			if miner.Status == "online" {
+				totalHR += miner.Stats.Hashrate
+				totalPower += miner.Stats.Power
+			}
+			if len(miner.Stats.HashrateHistory) > maxLen {
+				maxLen = len(miner.Stats.HashrateHistory)
+			}
+		}
+
+		d.State.Hashrate.Set(totalHR)
+		d.State.Power.Set(totalPower)
+
+		var aggregatedHistory []float64
+		if maxLen > 0 {
+			aggregatedHistory = make([]float64, maxLen)
+			for _, miner := range d.State.Devices {
+				offset := maxLen - len(miner.Stats.HashrateHistory)
+				for i, h := range miner.Stats.HashrateHistory {
+					aggregatedHistory[offset+i] += h
+				}
+			}
+		} else {
+			aggregatedHistory = d.State.HashrateHistory
+		}
+
+		if d.Chart != nil {
+			d.Chart.UpdateData(aggregatedHistory)
+		}
 		return
 	}
 	
 	selectedDevice := d.State.Devices[d.State.SelectedIndex]
+
+	// Update global Hashrate and Power to show only selected device
+	d.State.Hashrate.Set(selectedDevice.Stats.Hashrate)
+	d.State.Power.Set(selectedDevice.Stats.Power)
 
 	// Update selected device metrics
 	d.State.SelectedHashrate.Set(selectedDevice.Stats.Hashrate)
@@ -1071,4 +1188,22 @@ func (d *DashboardApp) updateSelectedDevice() {
 	if d.Chart != nil {
 		d.Chart.UpdateData(selectedDevice.Stats.HashrateHistory)
 	}
+}
+
+// appendToCSV helper to append records to CSV file
+func appendToCSV(filename string, record []string) {
+	fileInfo, err := os.Stat(filename)
+	isNew := os.IsNotExist(err) || (err == nil && fileInfo.Size() == 0)
+
+	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	writer := csv.NewWriter(file)
+	if isNew {
+		_ = writer.Write([]string{"Time", "Hashrate"})
+	}
+	_ = writer.Write(record)
+	writer.Flush()
 }

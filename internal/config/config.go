@@ -51,11 +51,13 @@ const (
 // يتم تحميلها من ملف config.json وتحتوي على جميع الإعدادات المطلوبة
 type Config struct {
 	// إعدادات عامة
-	Language     Language `json:"language"`      // لغة الواجهة (en/ar)
-	AutoRefresh  bool     `json:"auto_refresh"`  // التحديث التلقائي
-	RefreshRate  int      `json:"refresh_rate"`  // معدل التحديث بالثواني
-	Theme        string   `json:"theme"`         // السمة (dark/light)
-	WindowWidth  int      `json:"window_width"`  // عرض النافذة
+	ApplicationName string   `json:"application_name"` // اسم التطبيق
+	FarmUUID       string   `json:"farm_uuid"`       // معرّف المزرعة
+	Language       Language `json:"language"`      // لغة الواجهة (en/ar)
+	AutoRefresh    bool     `json:"auto_refresh"`  // التحديث التلقائي
+	RefreshRate    int      `json:"refresh_rate"`  // معدل التحديث بالثواني
+	Theme          string   `json:"theme"`         // السمة (dark/light)
+	WindowWidth    int      `json:"window_width"`  // عرض النافذة
 	WindowHeight int      `json:"window_height"` // ارتفاع النافذة
 
 	// إعدادات API
@@ -136,14 +138,16 @@ func NewConfigManager(configPath string) *ConfigManager {
 // getDefaultConfig يعيد الإعدادات الافتراضية
 func getDefaultConfig() *Config {
 	return &Config{
-		Language:           LangEnglish,
-		AutoRefresh:        true,
-		RefreshRate:        10,
-		Theme:              "dark",
-		WindowWidth:        1400,
-		WindowHeight:       900,
-		APIEndpoint:        "http://192.168.1.8:5000/api/v1",
-		APITargetDevice:    "http://192.168.1.8:5000/api/v1/devices/report",
+		ApplicationName:   "MinerGate",
+		FarmUUID:          "12345678-90ab-cdef-1234-567890abcdef",
+		Language:          LangEnglish,
+		AutoRefresh:       true,
+		RefreshRate:       10,
+		Theme:             "dark",
+		WindowWidth:       1400,
+		WindowHeight:      900,
+		APIEndpoint:        "http://[IP_ADDRESS]/api/v1",
+		APITargetDevice:    "http://[IP_ADDRESS]/api/v1/devices/report",
 		APITimeout:         30,
 		APIRetryCount:      3,
 		APIRetryDelay:      5,
@@ -154,8 +158,8 @@ func getDefaultConfig() *Config {
 		FRPProxyName:       "minergate",
 		GoASICEnabled:      true,
 		GoASICScanInterval: 60,
-		GoASICNetworkRange: "192.168.1.0/24",
-		UpdateCheckURL:     "http://192.168.1.8:5000/update/check",
+		GoASICNetworkRange: "[IP_ADDRESS]",
+		UpdateCheckURL:     "http://[IP_ADDRESS]/update/check",
 		UpdateAutoCheck:    true,
 		UpdateInterval:     24,
 		UpdateChannel:      "stable",

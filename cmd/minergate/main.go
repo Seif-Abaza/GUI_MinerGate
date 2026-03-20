@@ -68,6 +68,11 @@ func main() {
 	// تهيئة المكونات
 	fmt.Println("🔧 Initializing components...")
 
+	// Make sure device_log directory exists
+	if err := os.MkdirAll("device_log", 0755); err != nil {
+		fmt.Printf("⚠️ Warning: Failed to create device_log directory: %v\n", err)
+	}
+
 	// إنشاء عميل API
 	apiClient := api.NewClient(cfgMgr)
 	fmt.Println("  ✓ API client initialized")
