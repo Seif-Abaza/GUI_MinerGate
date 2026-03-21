@@ -1,0 +1,6 @@
+device_log/
+cmd/minergate/device_log/
+cmd/minergate/__debug*
+build/
+go.sum
+config.json
