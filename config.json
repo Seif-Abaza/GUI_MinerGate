@@ -19,7 +19,7 @@
     "frp_proxy_name": "minergate",
     "goasic_enabled": true,
     "goasic_scan_interval": 60,
-    "goasic_network_range": "192.168.1.0/24",
+    "goasic_network_range": "10.10.0.1/24",
     "update_check_url": "https://api.minergate.io/update/check",
     "update_auto_check": true,
     "update_interval": 24,

@@ -801,9 +801,9 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 		print("1D in Chart")
 	})
 	range1D.Importance = widget.HighImportance
-	range1W := widget.NewButton("1W", func() {
-		print("1W in Chart")
-	})
+	// range1W := widget.NewButton("1W", func() {
+	// 	print("1W in Chart")
+	// })
 
 	// v1.0.4: زر فتح الرسم البياني التفاعلي في المتصفح
 	openChartBtn := widget.NewButton("📈 Open Interactive Chart", func() {
@@ -813,13 +813,7 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 	})
 	openChartBtn.Importance = widget.HighImportance
 
-	timeRange := container.NewHBox(
-		widget.NewButton("<", nil),
-		widget.NewLabel("11 Mar"),
-		widget.NewButton(">", nil),
-		layout.NewSpacer(),
-		range1D,
-		range1W,
+	webchart := container.NewHBox(
 		openChartBtn, // v1.0.4
 	)
 
@@ -827,7 +821,7 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 	chartWidget := m.createChartWidget()
 
 	// Header
-	header := container.NewBorder(nil, nil, title, timeRange)
+	header := container.NewBorder(nil, nil, title, webchart)
 
 	// Chart container
 	chartContainer := container.NewBorder(header, chartWidget, nil, nil, nil)
