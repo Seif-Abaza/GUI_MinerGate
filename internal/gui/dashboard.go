@@ -823,8 +823,11 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 	// Header
 	header := container.NewBorder(nil, nil, title, webchart)
 
-	// Chart container
-	chartContainer := container.NewBorder(header, chartWidget, nil, nil, nil)
+	// Chart container - ضع الـ widget مباشرة بدلاً من border فارغ
+	chartContainer := container.NewVBox(
+		header,
+		chartWidget,
+	)
 
 	// Background
 	bg := canvas.NewRectangle(colorSurface)
@@ -846,6 +849,7 @@ type ChartWidget struct {
 func (c *ChartWidget) UpdateData(newData []float64) {
 	c.data = newData
 	c.calculateRange()
+	// استخدام fyne.Do لضمان التحديث على الـ main thread
 	fyne.Do(func() {
 		c.Refresh()
 	})
@@ -882,7 +886,10 @@ func (m *DashboardApp) createChartWidget() fyne.CanvasObject {
 	}
 	chart.ExtendBaseWidget(chart)
 	chart.calculateRange()
-	chart.Refresh() // ensure initial display is populated
+	// ضمان التحديث الأولي
+	fyne.Do(func() {
+		chart.Refresh()
+	})
 
 	m.Chart = chart // store reference for updates
 	return chart
@@ -914,6 +921,8 @@ func (c *ChartWidget) CreateRenderer() fyne.WidgetRenderer {
 type chartRenderer struct {
 	widget    *ChartWidget
 	chartText *canvas.Text
+	linePaths []*canvas.Line
+	points    []fyne.Position
 }
 
 func (r *chartRenderer) Layout(size fyne.Size) {
@@ -923,10 +932,13 @@ func (r *chartRenderer) Layout(size fyne.Size) {
 	// Stretch the placeholder text to fill the available space
 	r.chartText.Resize(size)
 	r.chartText.Move(fyne.NewPos(0, 0))
+	
+	// تحديث مواقع الخطوط عند تغيير الحجم
+	r.drawChart(size)
 }
 
 func (r *chartRenderer) MinSize() fyne.Size {
-	return fyne.NewSize(400, 150)
+	return fyne.NewSize(400, 200) // زيادة الارتفاع للرسم البياني
 }
 
 func (r *chartRenderer) Refresh() {
@@ -935,8 +947,9 @@ func (r *chartRenderer) Refresh() {
 	}
 
 	if len(r.widget.data) == 0 {
-		r.chartText.Text = "No data"
+		r.chartText.Text = "No data - Waiting for devices..."
 		r.chartText.Color = colorTextSecondary
+		r.chartText.Refresh()
 		return
 	}
 
@@ -944,9 +957,84 @@ func (r *chartRenderer) Refresh() {
 	latest := r.widget.data[len(r.widget.data)-1]
 	minVal := r.widget.minVal
 	maxVal := r.widget.maxVal
+	
+	// حساب المتوسط
+	var sum float64
+	for _, v := range r.widget.data {
+		sum += v
+	}
+	avg := sum / float64(len(r.widget.data))
+	
 	if latest != 0 {
-		r.chartText.Text = fmt.Sprintf("Latest: %.1f TH/s  (min: %.1f, max: %.1f)", latest, minVal, maxVal)
-		r.chartText.Color = colorTextPrimary
+		r.chartText.Text = fmt.Sprintf("⚡ Latest: %.1f TH/s  |  📊 Avg: %.1f  |  📈 Max: %.1f  |  📉 Min: %.1f", 
+			latest, avg, maxVal, minVal)
+		r.chartText.Color = colorBlue
+		r.chartText.TextSize = 13
+		r.chartText.TextStyle = fyne.TextStyle{Bold: true}
+		r.chartText.Refresh()
+		
+		// رسم المخطط البياني
+		r.drawChart(fyne.NewSize(800, 200))
+	}
+}
+
+// drawChart يرسم خط البيانات كمنحنى
+func (r *chartRenderer) drawChart(size fyne.Size) {
+	if len(r.widget.data) < 2 {
+		return
+	}
+	
+	// مسح الخطوط القديمة
+	for _, line := range r.linePaths {
+		line.Hide()
+	}
+	r.linePaths = make([]*canvas.Line, 0)
+	
+	// الهوامش
+	marginLeft := float32(50)
+	marginRight := float32(20)
+	marginTop := float32(40)
+	marginBottom := float32(30)
+	
+	chartWidth := size.Width - marginLeft - marginRight
+	chartHeight := size.Height - marginTop - marginBottom
+	
+	// حساب النقاط
+	dataLen := len(r.widget.data)
+	step := 1
+	if dataLen > 100 {
+		step = dataLen / 100 // تقليل النقاط للعرض
+	}
+	
+	r.points = make([]fyne.Position, 0)
+	for i := 0; i < dataLen; i += step {
+		x := marginLeft + chartWidth*float32(i)/float32(dataLen-1)
+		yRange := r.widget.maxVal - r.widget.minVal
+		if yRange == 0 {
+			yRange = 1
+		}
+		y := marginTop + chartHeight - chartHeight*float32((r.widget.data[i]-r.widget.minVal)/yRange)
+		r.points = append(r.points, fyne.NewPos(x, y))
+	}
+	
+	// رسم الخطوط بين النقاط
+	for i := 0; i < len(r.points)-1; i++ {
+		line := canvas.NewLine(colorBlue)
+		line.Position1 = r.points[i]
+		line.Position2 = r.points[i+1]
+		line.StrokeWidth = 2.5
+		r.linePaths = append(r.linePaths, line)
+	}
+	
+	// إضافة تأثير التدرج تحت الخط (Area effect)
+	for i := 0; i < len(r.points)-1; i++ {
+		rect := canvas.NewRectangle(color.RGBA{R: 137, G: 180, B: 250, A: 30})
+		width := r.points[i+1].X - r.points[i].X
+		height := size.Height - r.points[i].Y
+		rect.Resize(fyne.NewSize(width, height))
+		rect.Move(fyne.NewPos(r.points[i].X, r.points[i].Y))
+		r.linePaths = append(r.linePaths, &canvas.Line{}) // عنصر وهمي للحفاظ على التسلسل
+		_ = rect
 	}
 }
 
@@ -957,7 +1045,15 @@ func (r *chartRenderer) Objects() []fyne.CanvasObject {
 		r.chartText = canvas.NewText("Chart rendering...", colorTextSecondary)
 		r.chartText.TextSize = 12
 	}
-	return []fyne.CanvasObject{r.chartText}
+	
+	// إرجاع النص والخطوط المرسومة
+	objects := []fyne.CanvasObject{r.chartText}
+	for _, line := range r.linePaths {
+		if line != nil {
+			objects = append(objects, line)
+		}
+	}
+	return objects
 }
 
 // createFooter creates the status bar
@@ -1186,8 +1282,19 @@ func (d *DashboardApp) updateSelectedDevice() {
 			aggregatedHistory = d.State.HashrateHistory
 		}
 
+		// تحديث الرسم البياني باستخدام fyne.Do لضمان التحديث على الـ main thread
 		if d.Chart != nil {
-			d.Chart.UpdateData(aggregatedHistory)
+			fyne.Do(func() {
+				d.Chart.UpdateData(aggregatedHistory)
+			})
+		}
+		
+		// v1.0.4: تحديث سيرفر الرسم البياني التفاعلي أيضاً
+		if d.echartsServer != nil && len(aggregatedHistory) > 0 {
+			go func() {
+				filename := filepath.Join("device_log", "total_hashrate.csv")
+				_ = d.echartsServer.UpdateFromCSV(filename, "سجل إجمالي معدل التجزئة")
+			}()
 		}
 		return
 	}
@@ -1205,9 +1312,21 @@ func (d *DashboardApp) updateSelectedDevice() {
 	d.State.SelectedEfficiency.Set(selectedDevice.Stats.Efficiency)
 	d.State.SelectedErrors.Set(selectedDevice.Stats.Errors)
 
-	// Update chart with selected device's data
+	// Update chart with selected device's data using fyne.Do
 	if d.Chart != nil {
-		d.Chart.UpdateData(selectedDevice.Stats.HashrateHistory)
+		fyne.Do(func() {
+			d.Chart.UpdateData(selectedDevice.Stats.HashrateHistory)
+		})
+	}
+	
+	// v1.0.4: تحديث سيرفر الرسم البياني التفاعلي للجهاز المحدد
+	if d.echartsServer != nil && len(selectedDevice.Stats.HashrateHistory) > 0 {
+		go func(ip string) {
+			safeName := strings.ReplaceAll(ip, ".", "_")
+			safeName = strings.ReplaceAll(safeName, ":", "_")
+			filename := filepath.Join("device_log", fmt.Sprintf("%s.csv", safeName))
+			_ = d.echartsServer.UpdateFromCSV(filename, fmt.Sprintf("سجل جهاز %s", ip))
+		}(selectedDevice.ID)
 	}
 }
 
