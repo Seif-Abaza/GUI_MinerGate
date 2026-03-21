@@ -51,7 +51,7 @@ import (
 var (
 	// Background colors
 	colorBackground  = color.RGBA{R: 30, G: 30, B: 46, A: 255} // #1e1e2e
-	colorSurface     = color.RGBA{R: 49, G: 50, B: 68, A: 255} // #313244
+	colorSurface     = color.RGBA{R: 49, G: 50, B: 68, A: 255} // #384431
 	colorSurfaceHigh = color.RGBA{R: 69, G: 71, B: 90, A: 255} // #45475a
 
 	// Text colors
@@ -341,6 +341,9 @@ type DashboardApp struct {
 	mu             sync.RWMutex
 	DeviceList     *widget.List
 	DeviceCountStr binding.String
+	// مؤشر حالة اتصال FRP
+	frpStatusIndicator *canvas.Rectangle
+	frpConnected       bool
 }
 
 // NewDashboard ينشئ لوحة تحكم جديدة
@@ -653,12 +656,11 @@ func (m *DashboardApp) createMainContent() fyne.CanvasObject {
 		metrics,
 		widget.NewSeparator(),
 		chart,
-		// workers,
 	)
 
 	// Scroll container
 	scroll := container.NewScroll(content)
-	scroll.SetMinSize(fyne.NewSize(900, 700))
+	scroll.SetMinSize(fyne.Size{Width: 600, Height: 600})
 
 	// Background
 	bg := canvas.NewRectangle(colorBackground)
@@ -784,32 +786,11 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 	title.TextSize = 16
 	title.TextStyle = fyne.TextStyle{Bold: true}
 
-	// Time range buttons
-	range1D := widget.NewButton("1D", func() {
-		print("1D in Chart")
-	})
-	range1D.Importance = widget.HighImportance
-	// range1W := widget.NewButton("1W", func() {
-	// 	print("1W in Chart")
-	// })
-
-	// v1.0.4: زر فتح الرسم البياني التفاعلي في المتصفح
-	openChartBtn := widget.NewButton("📈 Open Interactive Chart", func() {
-		if m.echartsServer != nil {
-			openBrowserURL(m.echartsServer.URL())
-		}
-	})
-	openChartBtn.Importance = widget.HighImportance
-
-	webchart := container.NewHBox(
-		openChartBtn, // v1.0.4
-	)
-
 	// Chart placeholder (using custom rendering)
 	chartWidget := m.createChartWidget()
 
 	// Header
-	header := container.NewBorder(nil, nil, title, webchart)
+	header := container.NewBorder(nil, nil, title, nil)
 
 	// Chart container - ضع الـ widget مباشرة بدلاً من border فارغ
 	chartContainer := container.NewVBox(
@@ -872,6 +853,7 @@ func (m *DashboardApp) createChartWidget() fyne.CanvasObject {
 		data:     data,
 		appState: m.State,
 	}
+
 	chart.ExtendBaseWidget(chart)
 	chart.calculateRange()
 	// ضمان التحديث الأولي
@@ -962,7 +944,7 @@ func (r *chartRenderer) Refresh() {
 		r.chartText.Refresh()
 
 		// رسم المخطط البياني
-		r.drawChart(fyne.NewSize(800, 200))
+		r.drawChart(fyne.NewSize(800, 100))
 	}
 }
 
@@ -979,10 +961,10 @@ func (r *chartRenderer) drawChart(size fyne.Size) {
 	r.linePaths = make([]*canvas.Line, 0)
 
 	// الهوامش
-	marginLeft := float32(50)
-	marginRight := float32(20)
-	marginTop := float32(40)
-	marginBottom := float32(30)
+	marginLeft := float32(10)
+	marginRight := float32(10)
+	marginTop := float32(20)
+	marginBottom := float32(20)
 
 	chartWidth := size.Width - marginLeft - marginRight
 	chartHeight := size.Height - marginTop - marginBottom
@@ -1049,7 +1031,7 @@ func (r *chartRenderer) Objects() []fyne.CanvasObject {
 func (m *DashboardApp) createFooter() fyne.CanvasObject {
 	// Keyboard shortcuts
 	shortcuts := canvas.NewText("for support please visit your dashboard -> support", colorTextSecondary)
-	shortcuts.TextSize = 11
+	shortcuts.TextSize = 10
 
 	// Last update
 	updateLabel := widget.NewLabelWithData(m.State.LastUpdate)
@@ -1066,10 +1048,6 @@ func (m *DashboardApp) createFooter() fyne.CanvasObject {
 
 	return container.NewPadded(footer)
 }
-
-// =============================================================================
-// التحديث
-// =============================================================================
 
 // startAutoRefresh يبدأ التحديث التلقائي
 // يقوم بتشغيل مؤقت (Ticker) ويستدعي refreshData بشكل دوري.
@@ -1211,10 +1189,6 @@ func (d *DashboardApp) refreshData() {
 	go func(hr float64) {
 		filename := filepath.Join("device_log", "total_hashrate.csv")
 		appendToCSV(filename, []string{time.Now().Format("2006-01-02 15:04:05"), strconv.FormatFloat(hr, 'f', 2, 64)})
-		// v1.0.4: تحديث سيرفر الرسم البياني التفاعلي بعد كل كتابة
-		if d.echartsServer != nil {
-			_ = d.echartsServer.UpdateFromCSV(filename, "سجل إجمالي معدل التجزئة")
-		}
 	}(totalHR)
 
 	// تحديث بيانات الجهاز المحدد
@@ -1277,13 +1251,6 @@ func (d *DashboardApp) updateSelectedDevice() {
 			})
 		}
 
-		// v1.0.4: تحديث سيرفر الرسم البياني التفاعلي أيضاً
-		if d.echartsServer != nil && len(aggregatedHistory) > 0 {
-			go func() {
-				filename := filepath.Join("device_log", "total_hashrate.csv")
-				_ = d.echartsServer.UpdateFromCSV(filename, "سجل إجمالي معدل التجزئة")
-			}()
-		}
 		return
 	}
 
@@ -1305,16 +1272,6 @@ func (d *DashboardApp) updateSelectedDevice() {
 		fyne.Do(func() {
 			d.Chart.UpdateData(selectedDevice.Stats.HashrateHistory)
 		})
-	}
-
-	// v1.0.4: تحديث سيرفر الرسم البياني التفاعلي للجهاز المحدد
-	if d.echartsServer != nil && len(selectedDevice.Stats.HashrateHistory) > 0 {
-		go func(ip string) {
-			safeName := strings.ReplaceAll(ip, ".", "_")
-			safeName = strings.ReplaceAll(safeName, ":", "_")
-			filename := filepath.Join("device_log", fmt.Sprintf("%s.csv", safeName))
-			_ = d.echartsServer.UpdateFromCSV(filename, fmt.Sprintf("سجل جهاز %s", ip))
-		}(selectedDevice.ID)
 	}
 }
 
@@ -1357,12 +1314,4 @@ func openBrowserURL(rawURL string) {
 		args = []string{rawURL}
 	}
 	_ = exec.Command(cmd, args...).Start()
-}
-
-// StopEChartsServer يُوقف سيرفر الرسم البياني عند إغلاق التطبيق.
-// استدعِها من d.Window.SetCloseIntercept إذا أردت إيقافاً صريحاً.
-func (d *DashboardApp) StopEChartsServer() {
-	if d.echartsServer != nil {
-		d.echartsServer.Stop()
-	}
 }
