@@ -932,7 +932,7 @@ func (r *chartRenderer) Layout(size fyne.Size) {
 	// Stretch the placeholder text to fill the available space
 	r.chartText.Resize(size)
 	r.chartText.Move(fyne.NewPos(0, 0))
-	
+
 	// تحديث مواقع الخطوط عند تغيير الحجم
 	r.drawChart(size)
 }
@@ -957,22 +957,22 @@ func (r *chartRenderer) Refresh() {
 	latest := r.widget.data[len(r.widget.data)-1]
 	minVal := r.widget.minVal
 	maxVal := r.widget.maxVal
-	
+
 	// حساب المتوسط
 	var sum float64
 	for _, v := range r.widget.data {
 		sum += v
 	}
 	avg := sum / float64(len(r.widget.data))
-	
+
 	if latest != 0 {
-		r.chartText.Text = fmt.Sprintf("⚡ Latest: %.1f TH/s  |  📊 Avg: %.1f  |  📈 Max: %.1f  |  📉 Min: %.1f", 
+		r.chartText.Text = fmt.Sprintf("⚡ Latest: %.1f TH/s  |  📊 Avg: %.1f  |  📈 Max: %.1f  |  📉 Min: %.1f",
 			latest, avg, maxVal, minVal)
 		r.chartText.Color = colorBlue
 		r.chartText.TextSize = 13
 		r.chartText.TextStyle = fyne.TextStyle{Bold: true}
 		r.chartText.Refresh()
-		
+
 		// رسم المخطط البياني
 		r.drawChart(fyne.NewSize(800, 200))
 	}
@@ -983,29 +983,29 @@ func (r *chartRenderer) drawChart(size fyne.Size) {
 	if len(r.widget.data) < 2 {
 		return
 	}
-	
+
 	// مسح الخطوط القديمة
 	for _, line := range r.linePaths {
 		line.Hide()
 	}
 	r.linePaths = make([]*canvas.Line, 0)
-	
+
 	// الهوامش
 	marginLeft := float32(50)
 	marginRight := float32(20)
 	marginTop := float32(40)
 	marginBottom := float32(30)
-	
+
 	chartWidth := size.Width - marginLeft - marginRight
 	chartHeight := size.Height - marginTop - marginBottom
-	
+
 	// حساب النقاط
 	dataLen := len(r.widget.data)
 	step := 1
 	if dataLen > 100 {
 		step = dataLen / 100 // تقليل النقاط للعرض
 	}
-	
+
 	r.points = make([]fyne.Position, 0)
 	for i := 0; i < dataLen; i += step {
 		x := marginLeft + chartWidth*float32(i)/float32(dataLen-1)
@@ -1016,7 +1016,7 @@ func (r *chartRenderer) drawChart(size fyne.Size) {
 		y := marginTop + chartHeight - chartHeight*float32((r.widget.data[i]-r.widget.minVal)/yRange)
 		r.points = append(r.points, fyne.NewPos(x, y))
 	}
-	
+
 	// رسم الخطوط بين النقاط
 	for i := 0; i < len(r.points)-1; i++ {
 		line := canvas.NewLine(colorBlue)
@@ -1025,7 +1025,7 @@ func (r *chartRenderer) drawChart(size fyne.Size) {
 		line.StrokeWidth = 2.5
 		r.linePaths = append(r.linePaths, line)
 	}
-	
+
 	// إضافة تأثير التدرج تحت الخط (Area effect)
 	for i := 0; i < len(r.points)-1; i++ {
 		rect := canvas.NewRectangle(color.RGBA{R: 137, G: 180, B: 250, A: 30})
@@ -1045,7 +1045,7 @@ func (r *chartRenderer) Objects() []fyne.CanvasObject {
 		r.chartText = canvas.NewText("Chart rendering...", colorTextSecondary)
 		r.chartText.TextSize = 12
 	}
-	
+
 	// إرجاع النص والخطوط المرسومة
 	objects := []fyne.CanvasObject{r.chartText}
 	for _, line := range r.linePaths {
@@ -1288,7 +1288,7 @@ func (d *DashboardApp) updateSelectedDevice() {
 				d.Chart.UpdateData(aggregatedHistory)
 			})
 		}
-		
+
 		// v1.0.4: تحديث سيرفر الرسم البياني التفاعلي أيضاً
 		if d.echartsServer != nil && len(aggregatedHistory) > 0 {
 			go func() {
@@ -1318,7 +1318,7 @@ func (d *DashboardApp) updateSelectedDevice() {
 			d.Chart.UpdateData(selectedDevice.Stats.HashrateHistory)
 		})
 	}
-	
+
 	// v1.0.4: تحديث سيرفر الرسم البياني التفاعلي للجهاز المحدد
 	if d.echartsServer != nil && len(selectedDevice.Stats.HashrateHistory) > 0 {
 		go func(ip string) {
