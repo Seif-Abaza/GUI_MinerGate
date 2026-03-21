@@ -64,6 +64,9 @@ type Manager struct {
 	stopChan chan struct{}
 	scanChan chan string
 
+	// مسجل CSV
+	csvLogger *CSVLogger
+
 	// callbacks
 	onDeviceDiscovered func(device *DiscoveredDevice)
 	onDeviceLost       func(ip string)
@@ -78,11 +81,18 @@ type Manager struct {
 
 // NewManager ينشئ مدير أجهزة جديد
 func NewManager(cfg *config.Config) *Manager {
+	// إنشاء مسجل CSV
+	csvLogger, err := NewCSVLogger(DefaultLogDir)
+	if err != nil {
+		fmt.Printf("⚠️ WARNING: Failed to create CSV logger: %v\n", err)
+	}
+	
 	return &Manager{
-		cfg:      cfg,
-		devices:  make(map[string]*DiscoveredDevice),
-		stopChan: make(chan struct{}),
-		scanChan: make(chan string, 100),
+		cfg:       cfg,
+		devices:   make(map[string]*DiscoveredDevice),
+		stopChan:  make(chan struct{}),
+		scanChan:  make(chan string, 100),
+		csvLogger: csvLogger,
 	}
 }
 
