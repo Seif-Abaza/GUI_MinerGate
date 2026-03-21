@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	fyne.io/fyne/v2 v2.7.3
-	github.com/go-echarts/go-echarts/v2 v2.7.1
+	github.com/alexiusacademia/fynesimplechart v0.2.1
 	github.com/goasic/goasic v0.0.0
 	github.com/golang-infrastructure/go-project-root-directory v0.0.1
 	github.com/inconshreveable/go-update v0.0.0-20160112193335-8152e7eb6ccf

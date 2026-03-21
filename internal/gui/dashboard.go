@@ -16,9 +16,7 @@ import (
 	"fmt"
 	"image/color"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +39,7 @@ import (
 	"minergate/internal/models"
 	"minergate/internal/plugins"
 	"minergate/internal/update"
+	// fynesimplechart "github.com/alexiusacademia/fynesimplechart"
 )
 
 // =============================================================================
@@ -193,9 +192,6 @@ type AppState struct {
 	Workers       []Worker
 	SelectedIndex int
 
-	// الرسوم البيانية
-	HashrateChart  *charts.HashrateChartWidget
-	TempPowerChart *charts.TempPowerChartWidget
 	// Chart data
 	HashrateHistory []float64
 	// الإعدادات
@@ -341,8 +337,6 @@ type DashboardApp struct {
 	mu             sync.RWMutex
 	DeviceList     *widget.List
 	DeviceCountStr binding.String
-	// v1.0.4: سيرفر الرسم البياني التفاعلي (go-echarts)
-	echartsServer *charts.EChartsServer
 }
 
 // NewDashboard ينشئ لوحة تحكم جديدة
@@ -386,16 +380,6 @@ func NewDashboard(cfg *config.Config, apiClient *api.Client, frpClient *frp.Clie
 		goasicMgr.OnDeviceLost(func(ip string) {
 			go app.refreshData()
 		})
-	}
-
-	// v1.0.4: تشغيل سيرفر الرسم البياني التفاعلي (go-echarts)
-	if srv, err := charts.NewEChartsServer(); err == nil {
-		app.echartsServer = srv
-		// تحميل أي بيانات CSV موجودة مسبقاً
-		_ = srv.UpdateFromCSV(
-			filepath.Join("device_log", "total_hashrate.csv"),
-			"سجل إجمالي معدل التجزئة",
-		)
 	}
 
 	return app
@@ -801,27 +785,24 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 		print("1D in Chart")
 	})
 	range1D.Importance = widget.HighImportance
-	// range1W := widget.NewButton("1W", func() {
-	// 	print("1W in Chart")
-	// })
-
-	// v1.0.4: زر فتح الرسم البياني التفاعلي في المتصفح
-	openChartBtn := widget.NewButton("📈 Open Interactive Chart", func() {
-		if m.echartsServer != nil {
-			openBrowserURL(m.echartsServer.URL())
-		}
+	range1W := widget.NewButton("1W", func() {
+		print("1W in Chart")
 	})
-	openChartBtn.Importance = widget.HighImportance
 
-	webchart := container.NewHBox(
-		openChartBtn, // v1.0.4
+	timeRange := container.NewHBox(
+		widget.NewButton("<", nil),
+		widget.NewLabel("11 Mar"),
+		widget.NewButton(">", nil),
+		layout.NewSpacer(),
+		range1D,
+		range1W,
 	)
 
-	// Chart placeholder (using custom rendering)
+	// Chart widget (fynesimplechart مُضمَّن بداخله)
 	chartWidget := m.createChartWidget()
 
 	// Header
-	header := container.NewBorder(nil, nil, title, webchart)
+	header := container.NewBorder(nil, nil, title, timeRange)
 
 	// Chart container
 	chartContainer := container.NewBorder(header, chartWidget, nil, nil, nil)
@@ -833,28 +814,68 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 	return container.NewStack(bg, container.NewPadded(chartContainer))
 }
 
-// ChartWidget is a custom widget for displaying the hashrate chart
+// =============================================================================
+// ChartWidget — ودجت الرسم البياني المُضمَّن (fynesimplechart)
+// =============================================================================
+
+// ChartWidget يُدير عرض الرسم البياني للـ Hashrate.
+// يستخدم container.NewStack الداخلي لضمان تحديث صحيح وموثوق
+// بدلاً من custom renderer معقد.
 type ChartWidget struct {
-	widget.BaseWidget
-	data     []float64
-	minVal   float64
-	maxVal   float64
+	mu       sync.Mutex
+	inner    *fyne.Container // Stack container يحمل الرسم البياني الفعلي
+	csvPath  string
 	appState *AppState
 }
 
-// UpdateData updates the chart data and refreshes the display
+// UpdateData يُحدّث بيانات الرسم البياني ويُعيد الرسم فوراً.
+// يُستدعى من updateSelectedDevice() في كل دورة تحديث.
 func (c *ChartWidget) UpdateData(newData []float64) {
-	c.data = newData
-	c.calculateRange()
+	var newObj fyne.CanvasObject
+	if len(newData) > 0 {
+		if gw := charts.BuildGraphWidget(newData, "Hashrate (TH/s)"); gw != nil {
+			newObj = gw
+		}
+	}
+	if newObj == nil {
+		ph := canvas.NewText("⏳ Waiting for hashrate data...", charts.ChartLabelColor)
+		ph.TextSize = 13
+		ph.TextStyle = fyne.TextStyle{Italic: true}
+		newObj = ph
+	}
+	c.mu.Lock()
+	if len(c.inner.Objects) >= 2 {
+		c.inner.Objects[1] = newObj
+	} else {
+		c.inner.Objects = append(c.inner.Objects, newObj)
+	}
+	c.mu.Unlock()
 	fyne.Do(func() {
-		c.Refresh()
+		c.inner.Refresh()
 	})
 }
 
-// createChartWidget creates a new chart widget
+// UpdateFromCSV يقرأ بيانات CSV ويُحدّث الرسم البياني.
+// يُستدعى من refreshData() بعد كل كتابة CSV.
+func (c *ChartWidget) UpdateFromCSV() {
+	if c.csvPath == "" {
+		return
+	}
+	if vals := charts.ReadCSVValues(c.csvPath); len(vals) > 0 {
+		c.UpdateData(vals)
+	}
+}
+
+// createChartWidget ينشئ ChartWidget مع تحميل البيانات الأولية من CSV.
 func (m *DashboardApp) createChartWidget() fyne.CanvasObject {
+	csvPath := filepath.Join("device_log", "total_hashrate.csv")
+
+	// تحميل أي بيانات CSV موجودة مسبقاً كبداية
 	var data []float64
-	if len(m.State.Devices) > 0 {
+	if csvData := charts.ReadCSVValues(csvPath); len(csvData) > 0 {
+		data = csvData
+	} else if len(m.State.Devices) > 0 {
+		// fallback: بيانات الأجهزة الحية
 		if m.State.SelectedIndex >= 0 && m.State.SelectedIndex < len(m.State.Devices) {
 			data = m.State.Devices[m.State.SelectedIndex].Stats.HashrateHistory
 		} else {
@@ -873,18 +894,18 @@ func (m *DashboardApp) createChartWidget() fyne.CanvasObject {
 			}
 		}
 	} else {
-		data = m.State.HashrateHistory // fallback to global history
+		data = m.State.HashrateHistory // fallback نهائي
 	}
 
 	chart := &ChartWidget{
 		data:     data,
 		appState: m.State,
+		csvPath:  csvPath,
 	}
 	chart.ExtendBaseWidget(chart)
 	chart.calculateRange()
-	chart.Refresh() // ensure initial display is populated
 
-	m.Chart = chart // store reference for updates
+	m.Chart = chart
 	return chart
 }
 
@@ -908,56 +929,107 @@ func (c *ChartWidget) calculateRange() {
 }
 
 func (c *ChartWidget) CreateRenderer() fyne.WidgetRenderer {
-	return &chartRenderer{widget: c}
+	r := &chartRenderer{widget: c}
+	r.build()
+	return r
 }
 
+// =============================================================================
+// chartRenderer — Renderer يُضمِّن fynesimplechart داخل ChartWidget
+// =============================================================================
+
 type chartRenderer struct {
-	widget    *ChartWidget
-	chartText *canvas.Text
+	widget *ChartWidget
+
+	// lineChart هو الرسم البياني الحقيقي بـ fynesimplechart
+	// يُبنى مرة في build() ويُحدَّث في Refresh()
+	lineChart *fynesimplechartWidget
+
+	// placeholder يظهر عند عدم توفر البيانات
+	placeholder *canvas.Text
+}
+
+// fynesimplechartWidget يحمل GraphWidget كـ fyne.Widget
+// نستخدم fyne.Widget لتجنب استيراد fynesimplechart مباشرة في dashboard.go —
+// الإنشاء يتم في charts.BuildGraphWidget.
+type fynesimplechartWidget struct {
+	gw fyne.Widget
+}
+
+// newFyneSimpleChart ينشئ GraphWidget بالألوان الاحترافية.
+func newFyneSimpleChart(data []float64) *fynesimplechartWidget {
+	gw := charts.BuildGraphWidget(data, "Hashrate")
+	if gw == nil {
+		return nil
+	}
+	return &fynesimplechartWidget{gw: gw}
+}
+
+// build يبني عناصر الـ renderer عند الإنشاء الأول.
+func (r *chartRenderer) build() {
+	// Placeholder للحالة الفارغة
+	r.placeholder = canvas.NewText("⏳ Waiting for hashrate data...", charts.ChartLabelColor)
+	r.placeholder.TextSize = 13
+	r.placeholder.TextStyle = fyne.TextStyle{Italic: true}
+
+	// إنشاء fynesimplechart إذا كانت البيانات متوفرة
+	if len(r.widget.data) > 0 {
+		r.lineChart = newFyneSimpleChart(r.widget.data)
+	}
 }
 
 func (r *chartRenderer) Layout(size fyne.Size) {
-	if r.chartText == nil {
-		return
+	if r.lineChart != nil {
+		r.lineChart.gw.Resize(size)
+		r.lineChart.gw.Move(fyne.NewPos(0, 0))
 	}
-	// Stretch the placeholder text to fill the available space
-	r.chartText.Resize(size)
-	r.chartText.Move(fyne.NewPos(0, 0))
+	if r.placeholder != nil {
+		r.placeholder.Resize(size)
+		r.placeholder.Move(fyne.NewPos(0, size.Height/2-8))
+	}
 }
 
 func (r *chartRenderer) MinSize() fyne.Size {
-	return fyne.NewSize(400, 150)
+	return fyne.NewSize(400, 180)
 }
 
+// Refresh يُعيد بناء أو تحديث GraphWidget بالبيانات الجديدة.
+// يُستدعى تلقائياً من UpdateData() في كل دورة تحديث.
 func (r *chartRenderer) Refresh() {
-	if r.chartText == nil {
-		return
-	}
-
 	if len(r.widget.data) == 0 {
-		r.chartText.Text = "No data"
-		r.chartText.Color = colorTextSecondary
+		if r.lineChart != nil {
+			r.lineChart.gw.Hide()
+		}
+		if r.placeholder != nil {
+			r.placeholder.Show()
+			canvas.Refresh(r.placeholder)
+		}
 		return
 	}
 
-	// Display a simple summary of the current selection
-	latest := r.widget.data[len(r.widget.data)-1]
-	minVal := r.widget.minVal
-	maxVal := r.widget.maxVal
-	if latest != 0 {
-		r.chartText.Text = fmt.Sprintf("Latest: %.1f TH/s  (min: %.1f, max: %.1f)", latest, minVal, maxVal)
-		r.chartText.Color = colorTextPrimary
+	if r.placeholder != nil {
+		r.placeholder.Hide()
+	}
+
+	// إعادة بناء GraphWidget بكل تحديث لأن SetData غير متاح
+	r.lineChart = newFyneSimpleChart(r.widget.data)
+	if r.lineChart != nil {
+		r.lineChart.gw.Show()
+		canvas.Refresh(r.lineChart.gw)
 	}
 }
 
 func (r *chartRenderer) Destroy() {}
 
 func (r *chartRenderer) Objects() []fyne.CanvasObject {
-	if r.chartText == nil {
-		r.chartText = canvas.NewText("Chart rendering...", colorTextSecondary)
-		r.chartText.TextSize = 12
+	var objs []fyne.CanvasObject
+	if r.lineChart != nil {
+		objs = append(objs, r.lineChart.gw)
 	}
-	return []fyne.CanvasObject{r.chartText}
+	if r.placeholder != nil {
+		objs = append(objs, r.placeholder)
+	}
+	return objs
 }
 
 // createFooter creates the status bar
@@ -1127,9 +1199,9 @@ func (d *DashboardApp) refreshData() {
 	go func(hr float64) {
 		filename := filepath.Join("device_log", "total_hashrate.csv")
 		appendToCSV(filename, []string{time.Now().Format("2006-01-02 15:04:05"), strconv.FormatFloat(hr, 'f', 2, 64)})
-		// v1.0.4: تحديث سيرفر الرسم البياني التفاعلي بعد كل كتابة
-		if d.echartsServer != nil {
-			_ = d.echartsServer.UpdateFromCSV(filename, "سجل إجمالي معدل التجزئة")
+		// v1.0.4: تحديث الرسم البياني من CSV بعد كل كتابة (Real-Time)
+		if d.Chart != nil {
+			d.Chart.UpdateFromCSV()
 		}
 	}(totalHR)
 
@@ -1227,35 +1299,4 @@ func appendToCSV(filename string, record []string) {
 	}
 	_ = writer.Write(record)
 	writer.Flush()
-}
-
-// =============================================================================
-// v1.0.4 — دوال مساعدة جديدة
-// =============================================================================
-
-// openBrowserURL يفتح URL في المتصفح الافتراضي للنظام.
-// يدعم Linux (xdg-open) و macOS (open) و Windows (rundll32).
-func openBrowserURL(rawURL string) {
-	var cmd string
-	var args []string
-	switch runtime.GOOS {
-	case "windows":
-		cmd = "rundll32"
-		args = []string{"url.dll,FileProtocolHandler", rawURL}
-	case "darwin":
-		cmd = "open"
-		args = []string{rawURL}
-	default:
-		cmd = "xdg-open"
-		args = []string{rawURL}
-	}
-	_ = exec.Command(cmd, args...).Start()
-}
-
-// StopEChartsServer يُوقف سيرفر الرسم البياني عند إغلاق التطبيق.
-// استدعِها من d.Window.SetCloseIntercept إذا أردت إيقافاً صريحاً.
-func (d *DashboardApp) StopEChartsServer() {
-	if d.echartsServer != nil {
-		d.echartsServer.Stop()
-	}
 }
