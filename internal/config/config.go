@@ -28,7 +28,8 @@ import (
 // =============================================================================
 
 // Version إصدار التطبيق الحالي
-const Version = "1.0.3"
+// v1.0.4: إضافة رسم بياني تفاعلي بـ go-echarts + Sparkline مُضمَّن + فلترة زمنية
+const Version = "1.0.4"
 
 // AppName اسم التطبيق
 const AppName = "MinerGate Dashboard"

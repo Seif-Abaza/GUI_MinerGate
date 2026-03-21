@@ -16,7 +16,9 @@ import (
 	"fmt"
 	"image/color"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,11 +33,11 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"minergate/internal/api"
+	api "minergate/internal/api"
 	"minergate/internal/charts"
 	"minergate/internal/config"
 	goasic "minergate/internal/dbgoasic"
-	"minergate/internal/frp"
+	frp "minergate/internal/frp"
 	"minergate/internal/models"
 	"minergate/internal/plugins"
 	"minergate/internal/update"
@@ -330,15 +332,17 @@ func (s *AppState) UpdateDeviceCounts() {
 // DashboardApp التطبيق الرئيسي
 // يحتوي على حالة التطبيق، نافذة Fyne، ومنطق التحديث التلقائي.
 type DashboardApp struct {
-	App              fyne.App
-	Window           fyne.Window
-	State            *AppState
-	Chart            *ChartWidget
-	Ticker           *time.Ticker
-	StopChan         chan bool
-	mu               sync.RWMutex
-	DeviceList       *widget.List
-	DeviceCountStr   binding.String
+	App            fyne.App
+	Window         fyne.Window
+	State          *AppState
+	Chart          *ChartWidget
+	Ticker         *time.Ticker
+	StopChan       chan bool
+	mu             sync.RWMutex
+	DeviceList     *widget.List
+	DeviceCountStr binding.String
+	// v1.0.4: سيرفر الرسم البياني التفاعلي (go-echarts)
+	echartsServer *charts.EChartsServer
 }
 
 // NewDashboard ينشئ لوحة تحكم جديدة
@@ -382,6 +386,16 @@ func NewDashboard(cfg *config.Config, apiClient *api.Client, frpClient *frp.Clie
 		goasicMgr.OnDeviceLost(func(ip string) {
 			go app.refreshData()
 		})
+	}
+
+	// v1.0.4: تشغيل سيرفر الرسم البياني التفاعلي (go-echarts)
+	if srv, err := charts.NewEChartsServer(); err == nil {
+		app.echartsServer = srv
+		// تحميل أي بيانات CSV موجودة مسبقاً
+		_ = srv.UpdateFromCSV(
+			filepath.Join("device_log", "total_hashrate.csv"),
+			"سجل إجمالي معدل التجزئة",
+		)
 	}
 
 	return app
@@ -517,7 +531,7 @@ func (d *DashboardApp) createDeviceList() fyne.CanvasObject {
 	// Device count using data binding for thread safety
 	d.DeviceCountStr = binding.NewString()
 	d.DeviceCountStr.Set(fmt.Sprintf("Total: %d", len(d.State.Devices)))
-	
+
 	deviceCount := widget.NewLabelWithData(d.DeviceCountStr)
 	deviceCount.TextStyle = fyne.TextStyle{Bold: false}
 
@@ -546,7 +560,7 @@ func (d *DashboardApp) createDeviceList() fyne.CanvasObject {
 			}
 			device := d.State.Devices[id]
 			d.mu.RUnlock()
-			
+
 			hbox := item.(*fyne.Container)
 
 			// Update name
@@ -572,7 +586,7 @@ func (d *DashboardApp) createDeviceList() fyne.CanvasObject {
 		d.mu.Lock()
 		d.State.SelectedIndex = int(id)
 		d.mu.Unlock()
-		
+
 		d.mu.RLock()
 		d.updateSelectedDevice()
 		d.mu.RUnlock()
@@ -791,6 +805,14 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 		print("1W in Chart")
 	})
 
+	// v1.0.4: زر فتح الرسم البياني التفاعلي في المتصفح
+	openChartBtn := widget.NewButton("📈 Open Interactive Chart", func() {
+		if m.echartsServer != nil {
+			openBrowserURL(m.echartsServer.URL())
+		}
+	})
+	openChartBtn.Importance = widget.HighImportance
+
 	timeRange := container.NewHBox(
 		widget.NewButton("<", nil),
 		widget.NewLabel("11 Mar"),
@@ -798,6 +820,7 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 		layout.NewSpacer(),
 		range1D,
 		range1W,
+		openChartBtn, // v1.0.4
 	)
 
 	// Chart placeholder (using custom rendering)
@@ -1054,7 +1077,7 @@ func (d *DashboardApp) syncDevices() {
 		if existing, found := existingDevices[miner.ID]; found {
 			miner.Stats.HashrateHistory = append([]float64(nil), existing.Stats.HashrateHistory...)
 		}
-		
+
 		// Only track if online
 		if miner.Status == "online" {
 			miner.Stats.HashrateHistory = append(miner.Stats.HashrateHistory, miner.Stats.Hashrate)
@@ -1094,7 +1117,7 @@ func (d *DashboardApp) refreshData() {
 		if miner.Status == "online" {
 			totalHR += miner.Stats.Hashrate
 			totalPower += miner.Stats.Power
-			
+
 			// Log individual device hashrate
 			go func(ip string, hr float64) {
 				safeName := strings.ReplaceAll(ip, ".", "_")
@@ -1110,6 +1133,10 @@ func (d *DashboardApp) refreshData() {
 	go func(hr float64) {
 		filename := filepath.Join("device_log", "total_hashrate.csv")
 		appendToCSV(filename, []string{time.Now().Format("2006-01-02 15:04:05"), strconv.FormatFloat(hr, 'f', 2, 64)})
+		// v1.0.4: تحديث سيرفر الرسم البياني التفاعلي بعد كل كتابة
+		if d.echartsServer != nil {
+			_ = d.echartsServer.UpdateFromCSV(filename, "سجل إجمالي معدل التجزئة")
+		}
 	}(totalHR)
 
 	// تحديث بيانات الجهاز المحدد
@@ -1133,7 +1160,7 @@ func (d *DashboardApp) updateSelectedDevice() {
 	if len(d.State.Devices) == 0 {
 		return
 	}
-	
+
 	if d.State.SelectedIndex == -1 || d.State.SelectedIndex >= len(d.State.Devices) {
 		var totalHR float64
 		var totalPower int
@@ -1170,7 +1197,7 @@ func (d *DashboardApp) updateSelectedDevice() {
 		}
 		return
 	}
-	
+
 	selectedDevice := d.State.Devices[d.State.SelectedIndex]
 
 	// Update global Hashrate and Power to show only selected device
@@ -1206,4 +1233,35 @@ func appendToCSV(filename string, record []string) {
 	}
 	_ = writer.Write(record)
 	writer.Flush()
+}
+
+// =============================================================================
+// v1.0.4 — دوال مساعدة جديدة
+// =============================================================================
+
+// openBrowserURL يفتح URL في المتصفح الافتراضي للنظام.
+// يدعم Linux (xdg-open) و macOS (open) و Windows (rundll32).
+func openBrowserURL(rawURL string) {
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "windows":
+		cmd = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler", rawURL}
+	case "darwin":
+		cmd = "open"
+		args = []string{rawURL}
+	default:
+		cmd = "xdg-open"
+		args = []string{rawURL}
+	}
+	_ = exec.Command(cmd, args...).Start()
+}
+
+// StopEChartsServer يُوقف سيرفر الرسم البياني عند إغلاق التطبيق.
+// استدعِها من d.Window.SetCloseIntercept إذا أردت إيقافاً صريحاً.
+func (d *DashboardApp) StopEChartsServer() {
+	if d.echartsServer != nil {
+		d.echartsServer.Stop()
+	}
 }

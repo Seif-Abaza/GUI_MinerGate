@@ -123,8 +123,8 @@ func NewSecureHTTPClient(timeout time.Duration, insecureSkipVerify bool) *Secure
 
 	// إعدادات TLS
 	tlsConfig := &tls.Config{
-		RootCAs:            rootCAs,
-		MinVersion:         tls.VersionTLS12,
+		RootCAs:    rootCAs,
+		MinVersion: tls.VersionTLS12,
 		CipherSuites: []uint16{
 			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,

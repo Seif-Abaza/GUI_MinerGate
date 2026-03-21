@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	fyne.io/fyne/v2 v2.7.3
+	github.com/go-echarts/go-echarts/v2 v2.7.1
 	github.com/goasic/goasic v0.0.0
 	github.com/golang-infrastructure/go-project-root-directory v0.0.1
 	github.com/inconshreveable/go-update v0.0.0-20160112193335-8152e7eb6ccf
@@ -28,12 +29,14 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/golang-infrastructure/go-how-run v0.0.0-20230107060855-56163adc7748 // indirect
 	github.com/hack-pad/go-indexeddb v0.3.2 // indirect
-	github.com/hack-pad/safejs v0.1.0 // indirect
+	github.com/hack-pad/safejs v0.1.1 // indirect
 	github.com/jeandeaual/go-locale v0.0.0-20250612000132-0ef82f21eade // indirect
 	github.com/jsummers/gobmp v0.0.0-20230614200233-a9de23ed2e25 // indirect
+	github.com/kr/pretty v0.3.1 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/nicksnyder/go-i18n/v2 v2.5.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/rymdport/portal v0.4.2 // indirect
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c // indirect
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect

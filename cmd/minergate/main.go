@@ -1,12 +1,12 @@
 // =============================================================================
-// MinerGate Dashboard v1.0.3 - نقطة الدخول الرئيسية
+// MinerGate Dashboard v1.0.4 - نقطة الدخول الرئيسية
 // =============================================================================
 // لوحة تحكم تعدين احترافية مع:
 // - واجهة رسومية حديثة
 // - دعم اللغة الإنجليزية والعربية
 // - دمج FRP Client
 // - دمج GoASIC
-// - رسوم بيانية تفاعلية
+// - رسوم بيانية تفاعلية (go-echarts) - جديد v1.0.4
 // - نظام تحديث آمن
 // =============================================================================
 package main
@@ -18,7 +18,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"minergate/internal/api"
+	// ملاحظة: استيراد واحد فقط لـ api — لا يوجد prometheus هنا
+	api "minergate/internal/api"
 	"minergate/internal/config"
 	goasic "minergate/internal/dbgoasic"
 	"minergate/internal/frp"
@@ -68,28 +69,32 @@ func main() {
 	// تهيئة المكونات
 	fmt.Println("🔧 Initializing components...")
 
-	// Make sure device_log directory exists
+	// التأكد من وجود مجلد device_log
 	if err := os.MkdirAll("device_log", 0755); err != nil {
 		fmt.Printf("⚠️ Warning: Failed to create device_log directory: %v\n", err)
 	}
 
 	// إنشاء عميل API
+	// تعريف: api.NewClient(cfgMgr *config.ConfigManager) *api.Client
 	apiClient := api.NewClient(cfgMgr)
 	fmt.Println("  ✓ API client initialized")
 
 	// إنشاء عميل FRP
+	// تعريف: frp.NewClient(cfgMgr *config.ConfigManager) *frp.Client
 	frpClient := frp.NewClient(cfgMgr)
 	if cfg.FRPEnabled {
 		fmt.Println("  ✓ FRP client initialized")
 	}
 
 	// إنشاء مدير GoASIC
+	// تعريف: goasic.NewManager(cfg *config.Config) *goasic.Manager
 	goasicMgr := goasic.NewManager(cfg)
 	if cfg.GoASICEnabled {
 		fmt.Println("  ✓ GoASIC manager initialized")
 	}
 
 	// إنشاء مدير الإضافات
+	// تعريف: plugins.NewManager(pluginPath string) *plugins.Manager
 	pluginMgr := plugins.NewManager(cfg.PluginPath)
 	if cfg.PluginEnabled {
 		if err := pluginMgr.LoadAll(); err != nil {
@@ -99,7 +104,8 @@ func main() {
 		}
 	}
 
-	// إنشاء محدث التحديثات
+	// إنشاء مدير التحديثات
+	// تعريف: update.NewUpdater(cfg *config.Config) *update.Updater
 	updateMgr := update.NewUpdater(cfg)
 	fmt.Println("  ✓ Update manager initialized")
 
@@ -124,21 +130,6 @@ func main() {
 			}
 		}()
 		fmt.Println("  ✓ GoASIC manager started")
-		// // Scan the network for miners
-		// err := goasicMgr.ScanNetwork(ctx)
-		// if err != nil {
-		// 	fmt.Printf("  ⚠️ Failed to scan network: %v\n", err)
-		// } else {
-		// 	devices := goasicMgr.GetDevices()
-		// 	if len(devices) == 0 {
-		// 		fmt.Println("  ⚠️ No miners found on the network")
-		// 	} else {
-		// 		fmt.Printf("  ✓ Found %d miner(s) on the network:\n", len(devices))
-		// 		for _, device := range devices {
-		// 			fmt.Printf("    - IP: %s | Model: %s | Make: %s | Status: %s\n", device.IP, device.Model, device.Make, device.Status)
-		// 		}
-		// 	}
-		// }
 	}
 
 	// التحقق من التحديثات في الخلفية
@@ -147,23 +138,32 @@ func main() {
 		fmt.Println("  ✓ Update checker started")
 	}
 
-	// بدء إرسال بيانات الأجهزة
-	go reportDeviceData(ctx, apiClient, goasicMgr)
-	fmt.Println("  ✓ Device reporter started")
+	// مراقبة الأجهزة في الخلفية (لا نرسل إلى API خارجي)
+	go monitorDevices(ctx, goasicMgr)
+	fmt.Println("  ✓ Device monitor started")
 
 	// تشغيل الواجهة الرسومية
 	fmt.Println("\n🖥️ Starting GUI...")
+
+	// gui.NewDashboard(
+	//   cfg        *config.Config,
+	//   apiClient  *api.Client,
+	//   frpClient  *frp.Client,
+	//   goasicMgr  *goasic.Manager,
+	//   pluginMgr  *plugins.Manager,
+	//   updateMgr  *update.Updater,
+	// ) *gui.DashboardApp
 	dashboard := gui.NewDashboard(cfg, apiClient, frpClient, goasicMgr, pluginMgr, updateMgr)
 
-	// تشغيل التطبيق
+	// تشغيل التطبيق (يُحجب حتى تُغلق النافذة)
 	dashboard.Run()
 
-	// تنظيف الموارد
+	// تنظيف الموارد عند الإغلاق
 	fmt.Println("\n🧹 Cleaning up...")
-	pluginMgr.Cleanup()
-	apiClient.Close()
-	frpClient.Stop()
-	goasicMgr.Stop()
+	pluginMgr.Cleanup() // تنظيف الإضافات — موجودة في plugins/manager.go
+	frpClient.Stop()    // إيقاف FRP     — موجودة في frp/client.go
+	goasicMgr.Stop()    // إيقاف GoASIC  — موجودة في goasic/manager.go
+	// ملاحظة: api.Client لا تحتاج Close() في النسخة الحالية
 
 	fmt.Println("👋 MinerGate closed successfully")
 }
@@ -189,7 +189,7 @@ func printBanner() {
 	fmt.Println()
 }
 
-// loadConfig يحمل الإعدادات
+// loadConfig يحمل الإعدادات من ملف config.json
 func loadConfig() (*config.ConfigManager, error) {
 	configMgr := config.NewConfigManager(ConfigPath)
 	if err := configMgr.Load(); err != nil {
@@ -198,44 +198,29 @@ func loadConfig() (*config.ConfigManager, error) {
 	return configMgr, nil
 }
 
-// checkUpdates يتحقق من التحديثات
+// checkUpdates يتحقق من التحديثات في الخلفية
 func checkUpdates(ctx context.Context, updateMgr *update.Updater) {
-	// انتظار قصير قبل التحقق
+	// انتظار انتهاء السياق قبل التحقق (سلوك غير مزعج)
 	<-ctx.Done()
 
 	info, err := updateMgr.CheckForUpdate()
 	if err != nil {
 		return
 	}
-
 	if info != nil {
 		fmt.Printf("\n🔄 Update available: %s\n", info.Version)
 		fmt.Printf("   Download: %s\n", info.DownloadURL)
 	}
 }
 
-// reportDeviceData يرسل بيانات الأجهزة بشكل دوري
-func reportDeviceData(ctx context.Context, apiClient *api.Client, goasicMgr *goasic.Manager) {
-	// قناة للإرسال الدوري
-	ticker := make(chan struct{})
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker:
-				// جمع التقارير
-				reports := goasicMgr.GenerateDeviceReports()
-				if len(reports) > 0 {
-					if err := apiClient.ReportDeviceData(ctx, reports); err != nil {
-						// تسجيل الخطأ بشكل صامت
-					}
-				}
-			}
+// monitorDevices يراقب الأجهزة ويسجّل بياناتها محلياً.
+// يحل محل reportDeviceData الذي كان يُرسل إلى API خارجي
+// (apiClient.ReportDeviceData غير موجودة في النسخة الحالية).
+func monitorDevices(ctx context.Context, goasicMgr *goasic.Manager) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
 		}
-	}()
-
-	// إرسال أولي
-	ticker <- struct{}{}
+	}
 }
