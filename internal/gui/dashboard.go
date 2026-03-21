@@ -822,7 +822,11 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 // يستخدم container.NewStack الداخلي لضمان تحديث صحيح وموثوق
 // بدلاً من custom renderer معقد.
 type ChartWidget struct {
+	widget.BaseWidget
 	mu       sync.Mutex
+	data     []float64
+	minVal   float64
+	maxVal   float64
 	inner    *fyne.Container // Stack container يحمل الرسم البياني الفعلي
 	csvPath  string
 	appState *AppState
