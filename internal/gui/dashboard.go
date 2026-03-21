@@ -341,8 +341,6 @@ type DashboardApp struct {
 	mu             sync.RWMutex
 	DeviceList     *widget.List
 	DeviceCountStr binding.String
-	// v1.0.4: سيرفر الرسم البياني التفاعلي (go-echarts)
-	echartsServer *charts.EChartsServer
 }
 
 // NewDashboard ينشئ لوحة تحكم جديدة
@@ -386,16 +384,6 @@ func NewDashboard(cfg *config.Config, apiClient *api.Client, frpClient *frp.Clie
 		goasicMgr.OnDeviceLost(func(ip string) {
 			go app.refreshData()
 		})
-	}
-
-	// v1.0.4: تشغيل سيرفر الرسم البياني التفاعلي (go-echarts)
-	if srv, err := charts.NewEChartsServer(); err == nil {
-		app.echartsServer = srv
-		// تحميل أي بيانات CSV موجودة مسبقاً
-		_ = srv.UpdateFromCSV(
-			filepath.Join("device_log", "total_hashrate.csv"),
-			"سجل إجمالي معدل التجزئة",
-		)
 	}
 
 	return app
