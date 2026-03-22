@@ -399,12 +399,21 @@ type AppState struct {
 	LastUpdate     binding.String
 
 	// مقاييس الجهاز المحدد
-	SelectedHashrate   binding.Float
-	SelectedTemp       binding.Float
-	SelectedPower      binding.Int
-	SelectedUptime     binding.Float
-	SelectedEfficiency binding.Float
-	SelectedErrors     binding.Int
+	SelectedHashrate     binding.Float
+	SelectedTemp         binding.Float
+	SelectedPower        binding.Int
+	SelectedUptime       binding.Float
+	SelectedEfficiency   binding.Float
+	SelectedErrors       binding.Int
+	SelectedModel        binding.String
+	SelectedAlgorithm    binding.String
+	SelectedFanSpeeds    binding.String
+	SelectedPool         binding.String
+	SelectedMAC          binding.String
+	SelectedIP           binding.String
+	SelectedStatus       binding.String
+	SelectedWattageLimit binding.Int
+	SelectedChipCount    binding.Int
 
 	// الأجهزة
 	Devices       []*models.Miner
@@ -477,13 +486,22 @@ func NewAppState(cfg *config.Config) *AppState {
 		DailyBTC:           binding.NewFloat(),
 		DailyProfit:        binding.NewFloat(),
 		MonthlyProfit:      binding.NewFloat(),
-		LastUpdate:         binding.NewString(),
-		SelectedHashrate:   binding.NewFloat(),
-		SelectedTemp:       binding.NewFloat(),
-		SelectedPower:      binding.NewInt(),
+		LastUpdate:          binding.NewString(),
+		SelectedHashrate:    binding.NewFloat(),
+		SelectedTemp:        binding.NewFloat(),
+		SelectedPower:       binding.NewInt(),
 		SelectedUptime:     binding.NewFloat(),
 		SelectedEfficiency: binding.NewFloat(),
 		SelectedErrors:     binding.NewInt(),
+		SelectedModel:      binding.NewString(),
+		SelectedAlgorithm:  binding.NewString(),
+		SelectedFanSpeeds:  binding.NewString(),
+		SelectedPool:       binding.NewString(),
+		SelectedMAC:        binding.NewString(),
+		SelectedIP:         binding.NewString(),
+		SelectedStatus:     binding.NewString(),
+		SelectedWattageLimit: binding.NewInt(),
+		SelectedChipCount:    binding.NewInt(),
 		AutoRefresh:        binding.NewBool(),
 		RefreshRate:        cfg.RefreshRate,
 		Config:             cfg,
@@ -892,18 +910,17 @@ func (m *DashboardApp) createMainContent() fyne.CanvasObject {
 	// Metrics grid
 	metrics := m.createMetricsGrid()
 
+	// Selected device details panel
+	deviceDetails := m.createSelectedDevicePanel()
+
 	// Chart
 	chart := m.createChart()
-
-	// Workers table
-	// workers := m.createWorkersTable()
 
 	// Stack vertically
 	content := container.NewVBox(
 		metrics,
-		widget.NewSeparator(),
+		deviceDetails,
 		chart,
-		// workers,
 	)
 
 	// Scroll container
@@ -914,6 +931,74 @@ func (m *DashboardApp) createMainContent() fyne.CanvasObject {
 	bg := canvas.NewRectangle(colorBackground)
 
 	return container.NewStack(bg, container.NewPadded(scroll))
+}
+
+// createSelectedDevicePanel creates a detailed panel for the selected device
+func (m *DashboardApp) createSelectedDevicePanel() fyne.CanvasObject {
+	// Title
+	title := canvas.NewText("💻 Selected Device Details", colorBlue)
+	title.TextSize = 16
+	title.TextStyle = fyne.TextStyle{Bold: true}
+
+	// Device info grid - row 1
+	infoRow1 := container.NewGridWithColumns(4,
+		m.createInfoCard("Model", m.State.SelectedModel),
+		m.createInfoCard("IP Address", m.State.SelectedIP),
+		m.createInfoCard("MAC Address", m.State.SelectedMAC),
+		m.createInfoCard("Status", m.State.SelectedStatus),
+	)
+
+	// Device info grid - row 2
+	infoRow2 := container.NewGridWithColumns(4,
+		m.createInfoCard("Algorithm", m.State.SelectedAlgorithm),
+		m.createInfoCard("Pool", m.State.SelectedPool),
+		m.createInfoCard("Fan Speeds", m.State.SelectedFanSpeeds),
+		m.createInfoCard("Chip Count", m.State.SelectedChipCount),
+	)
+
+	// Device metrics row
+	metricsRow := container.NewGridWithColumns(4,
+		m.createMetricCard("Hashrate", m.State.SelectedHashrate, "TH/s", colorBlue),
+		m.createMetricCard("Temperature", m.State.SelectedTemp, "°C", colorOrange),
+		m.createMetricCard("Power", m.State.SelectedPower, "W", colorRed),
+		m.createMetricCard("Efficiency", m.State.SelectedEfficiency, "J/TH", colorGreen),
+	)
+
+	// All content
+	content := container.NewVBox(
+		title,
+		infoRow1,
+		infoRow2,
+		metricsRow,
+	)
+
+	// Background
+	bg := canvas.NewRectangle(colorSurface)
+	bg.CornerRadius = 8
+
+	return container.NewStack(bg, container.NewPadded(content))
+}
+
+// createInfoCard creates a card for displaying device info
+func (m *DashboardApp) createInfoCard(title string, value binding.DataItem) fyne.CanvasObject {
+	// Title
+	titleLabel := canvas.NewText(title, colorTextSecondary)
+	titleLabel.TextSize = 11
+
+	// Value
+	var valueLabel *widget.Label
+	switch v := value.(type) {
+	case binding.String:
+		valueLabel = widget.NewLabelWithData(v)
+	default:
+		valueLabel = widget.NewLabel("N/A")
+	}
+	valueLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	// Container
+	card := container.NewVBox(titleLabel, valueLabel)
+
+	return card
 }
 
 // createMetricsGrid creates the metrics cards grid
@@ -1034,52 +1119,20 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 	title.TextSize = 16
 	title.TextStyle = fyne.TextStyle{Bold: true}
 
-	// Time range buttons
-	range1D := widget.NewButton("1D", func() {
-		print("1D in Chart")
-	})
-	range1D.Importance = widget.HighImportance
-	range1W := widget.NewButton("1W", func() {
-		print("1W in Chart")
-	})
-
-	// Global/Individual toggle button
-	viewToggleBtn := widget.NewButton("🌐 Global", func() {
-		m.State.ChartViewGlobal = !m.State.ChartViewGlobal
-		// Refresh chart data based on view mode
-		if m.Chart != nil {
-			m.Chart.UpdateFromCSV()
-		}
-	})
-	viewToggleBtn.Importance = widget.MediumImportance
-
-	// Focus Mode indicator
-	focusModeLabel := canvas.NewText("", colorPurple)
-	focusModeLabel.TextSize = 12
-
-	timeRange := container.NewHBox(
-		widget.NewButton("<", nil),
-		widget.NewLabel("11 Mar"),
-		widget.NewButton(">", nil),
-		layout.NewSpacer(),
-		viewToggleBtn,
-		range1D,
-		range1W,
-	)
-
 	// Chart widget (fynesimplechart مُضمَّن بداخله)
 	chartWidget := m.createChartWidget()
 
-	// Header with title and view toggle
-	header := container.NewBorder(nil, nil, container.NewHBox(title, layout.NewSpacer(), focusModeLabel), timeRange)
+	// Header with title only
+	header := container.NewBorder(nil, nil, title, nil)
 
-	// Chart container
-	chartContainer := container.NewBorder(header, chartWidget, nil, nil, nil)
+	// Chart container - header on top, chart below
+	chartContainer := container.NewVBox(header, chartWidget)
 
-	// Background
+	// Background with rounded corners
 	bg := canvas.NewRectangle(colorSurface)
-	bg.CornerRadius = 8
+	bg.CornerRadius = 12
 
+	// Stack background and content
 	return container.NewStack(bg, container.NewPadded(chartContainer))
 }
 
@@ -1664,6 +1717,37 @@ func (d *DashboardApp) updateSelectedDevice() {
 	d.State.SelectedPower.Set(selectedDevice.Stats.Power)
 	d.State.SelectedEfficiency.Set(selectedDevice.Stats.Efficiency)
 	d.State.SelectedErrors.Set(selectedDevice.Stats.Errors)
+
+	// Update extended device info
+	d.State.SelectedModel.Set(selectedDevice.Model)
+	d.State.SelectedAlgorithm.Set(selectedDevice.Algorithm)
+	d.State.SelectedIP.Set(selectedDevice.IPAddress)
+	d.State.SelectedMAC.Set(selectedDevice.MACAddress)
+	d.State.SelectedStatus.Set(selectedDevice.Status)
+
+	// Format fan speeds
+	fanSpeeds := ""
+	for i, f := range selectedDevice.Stats.FanSpeeds {
+		if i > 0 {
+			fanSpeeds += ", "
+		}
+		fanSpeeds += fmt.Sprintf("%d RPM", f)
+	}
+	if fanSpeeds == "" {
+		fanSpeeds = "N/A"
+	}
+	d.State.SelectedFanSpeeds.Set(fanSpeeds)
+
+	// Pool info
+	poolURL := "N/A"
+	if len(selectedDevice.Config.Pools) > 0 {
+		poolURL = selectedDevice.Config.Pools[0].URL
+	}
+	d.State.SelectedPool.Set(poolURL)
+
+	// Wattage limit and chip count
+	d.State.SelectedWattageLimit.Set(selectedDevice.Stats.PowerLimit)
+	d.State.SelectedChipCount.Set(selectedDevice.Stats.ChipCount)
 
 	// Update chart with selected device's data
 	if d.Chart != nil {
