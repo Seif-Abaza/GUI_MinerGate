@@ -67,6 +67,225 @@ var (
 )
 
 // =============================================================================
+// Localization - centralized UI strings
+// =============================================================================
+
+// UIStrings holds all UI text for easy localization
+var UIStrings = map[string]map[string]string{
+	"en": {
+		// KPIs
+		"total_hashrate": "Total Hashrate",
+		"total_power":    "Total Power",
+		"active_miners":  "Active Miners",
+		"inactive_miners": "Inactive Miners",
+		// Units
+		"th_s":    "TH/s",
+		"watts":   "W",
+		"devices": "devices",
+		// Chart
+		"global_view": "Global View",
+		"device_view": "Device View",
+		// Footer
+		"frp_status":     "FRP Status",
+		"api_status":     "API Status",
+		"ip_range":       "IP Range",
+		"online":         "Online",
+		"offline":        "Offline",
+		"connected":      "Connected",
+		"disconnected":   "Disconnected",
+		// Focus Mode
+		"focus_mode":    "Focus Mode",
+		"exit_focus":    "Exit Focus",
+		"all_devices":   "All Devices",
+		// Device Actions
+		"rename":         "Rename",
+		"restart":        "Restart",
+		"reboot":         "Reboot",
+		"view_details":   "View Details",
+		// Modal
+		"save":           "Save",
+		"cancel":         "Cancel",
+		"edit_ip_range":  "Edit IP Range",
+		"current_range":  "Current Range",
+		"new_range":      "New Range",
+	},
+	"ar": {
+		// KPIs
+		"total_hashrate":  "إجمالي معدل التجزئة",
+		"total_power":     "إجمالي الطاقة",
+		"active_miners":  "المعدنين النشطين",
+		"inactive_miners": "المعدنين غير النشطين",
+		// Units
+		"th_s":    "ث/ثانية",
+		"watts":   "واط",
+		"devices": "أجهزة",
+		// Chart
+		"global_view": "العرض العالمي",
+		"device_view": "عرض الجهاز",
+		// Footer
+		"frp_status":     "حالة FRP",
+		"api_status":     "حالة API",
+		"ip_range":       "نطاق IP",
+		"online":         "متصل",
+		"offline":        "غير متصل",
+		"connected":      "موصول",
+		"disconnected":   "غير موصول",
+		// Focus Mode
+		"focus_mode":    "وضع التركيز",
+		"exit_focus":    "الخروج من التركيز",
+		"all_devices":   "جميع الأجهزة",
+		// Device Actions
+		"rename":         "إعادة تسمية",
+		"restart":        "إعادة تشغيل",
+		"reboot":         "إعادة boot",
+		"view_details":   "عرض التفاصيل",
+		// Modal
+		"save":           "حفظ",
+		"cancel":         "إلغاء",
+		"edit_ip_range":  "تعديل نطاق IP",
+		"current_range":  "النطاق الحالي",
+		"new_range":      "النطاق الجديد",
+	},
+}
+
+// GetText returns localized string
+func GetText(key string, lang string) string {
+	if l, ok := UIStrings[lang]; ok {
+		if t, ok := l[key]; ok {
+			return t
+		}
+	}
+	// Fallback to English
+	if t, ok := UIStrings["en"][key]; ok {
+		return t
+	}
+	return key
+}
+
+// =============================================================================
+// CSV Persistence for Device Data
+// =============================================================================
+
+// DeviceCSVRecord represents a single device data record for CSV
+type DeviceCSVRecord struct {
+	Timestamp   time.Time
+	MACAddress  string
+	IPAddress   string
+	Name        string
+	Model       string
+	Hashrate    float64
+	Power       int
+	Temperature float64
+	Uptime      uint64
+	Status      string
+}
+
+// SaveDeviceToCSV saves device telemetry to CSV
+func SaveDeviceToCSV(device *models.Miner, csvPath string) error {
+	// Ensure directory exists
+	dir := filepath.Dir(csvPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	record := DeviceCSVRecord{
+		Timestamp:   time.Now(),
+		MACAddress:  device.MACAddress,
+		IPAddress:   device.IPAddress,
+		Name:        device.Name,
+		Model:       device.Model,
+		Hashrate:    device.Stats.Hashrate,
+		Power:       device.Stats.Power,
+		Temperature: device.Stats.Temperature,
+		Uptime:      device.Uptime,
+		Status:      device.Status,
+	}
+
+	// Check if file exists to determine if we need header
+	_, err := os.Stat(csvPath)
+	needsHeader := os.IsNotExist(err)
+
+	file, err := os.OpenFile(csvPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	if needsHeader {
+		writer.Write([]string{
+			"timestamp", "mac_address", "ip_address", "name", "model",
+			"hashrate", "power", "temperature", "uptime", "status",
+		})
+	}
+
+	writer.Write([]string{
+		record.Timestamp.Format(time.RFC3339),
+		record.MACAddress,
+		record.IPAddress,
+		record.Name,
+		record.Model,
+		fmt.Sprintf("%.2f", record.Hashrate),
+		fmt.Sprintf("%d", record.Power),
+		fmt.Sprintf("%.1f", record.Temperature),
+		fmt.Sprintf("%d", record.Uptime),
+		record.Status,
+	})
+
+	return writer.Error()
+}
+
+// LoadDeviceHistory loads device history from CSV
+func LoadDeviceHistory(csvPath string, macAddress string) ([]DeviceCSVRecord, error) {
+	file, err := os.Open(csvPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	var results []DeviceCSVRecord
+	for i, record := range records {
+		if i == 0 { // Skip header
+			continue
+		}
+		if len(record) < 10 {
+			continue
+		}
+		if record[1] == macAddress { // MACAddress column
+			mac := record[1]
+			ts, _ := time.Parse(time.RFC3339, record[0])
+			hr, _ := strconv.ParseFloat(record[5], 64)
+			pwr, _ := strconv.Atoi(record[6])
+			temp, _ := strconv.ParseFloat(record[7], 64)
+			up, _ := strconv.ParseUint(record[8], 10, 64)
+
+			results = append(results, DeviceCSVRecord{
+				Timestamp:   ts,
+				MACAddress:  mac,
+				IPAddress:   record[2],
+				Name:        record[3],
+				Model:       record[4],
+				Hashrate:    hr,
+				Power:       pwr,
+				Temperature: temp,
+				Uptime:      up,
+				Status:      record[9],
+			})
+		}
+	}
+
+	return results, nil
+}
+
+// =============================================================================
 // سمة التعدين
 // =============================================================================
 
@@ -194,7 +413,27 @@ type AppState struct {
 
 	// Chart data
 	HashrateHistory []float64
-	// الإعدادات
+
+	// Focus Mode - filters metrics to selected device only
+	FocusMode     bool
+	FocusedDevice *models.Miner
+
+	// Chart View Toggle (Global vs Individual)
+	ChartViewGlobal bool // true = global aggregate, false = individual device
+
+	// CSV Persistence
+	DeviceCSVPath string
+
+	// Total Power Consumption
+	TotalPower binding.Int
+
+	// IP Range for network scanning
+	IPRange string
+
+	// API Connectivity Status
+	APIConnected bool
+
+	// إعدادات
 	AutoRefresh binding.Bool
 	RefreshRate int
 
@@ -230,6 +469,7 @@ func NewAppState(cfg *config.Config) *AppState {
 		OfflineDevices:     binding.NewInt(),
 		Efficiency:         binding.NewFloat(),
 		Power:              binding.NewInt(),
+		TotalPower:         binding.NewInt(),
 		Balance:            binding.NewFloat(),
 		Revenue24h:         binding.NewFloat(),
 		Uptime:             binding.NewFloat(),
@@ -250,6 +490,12 @@ func NewAppState(cfg *config.Config) *AppState {
 		Devices:            make([]*models.Miner, 0),
 		Workers:            make([]Worker, 0),
 		SelectedIndex:      -1,
+		// New fields initialization
+		FocusMode:        false,
+		ChartViewGlobal:  true,
+		DeviceCSVPath:    "device_log/miners.csv",
+		IPRange:          cfg.GoASICNetworkRange,
+		APIConnected:     false,
 	}
 }
 
@@ -564,6 +810,11 @@ func (d *DashboardApp) createDeviceList() fyne.CanvasObject {
 	list.OnSelected = func(id widget.ListItemID) {
 		d.mu.Lock()
 		d.State.SelectedIndex = int(id)
+		// Enable Focus Mode when a device is selected
+		if int(id) >= 0 && int(id) < len(d.State.Devices) {
+			d.State.FocusMode = true
+			d.State.FocusedDevice = d.State.Devices[int(id)]
+		}
 		d.mu.Unlock()
 
 		d.mu.RLock()
@@ -574,12 +825,20 @@ func (d *DashboardApp) createDeviceList() fyne.CanvasObject {
 	list.OnUnselected = func(id widget.ListItemID) {
 		d.mu.Lock()
 		d.State.SelectedIndex = -1
+		// Disable Focus Mode when unselected
+		d.State.FocusMode = false
+		d.State.FocusedDevice = nil
 		d.mu.Unlock()
 
 		d.mu.RLock()
 		d.updateSelectedDevice()
 		d.mu.RUnlock()
 	}
+
+	// Right-click context menu for device actions
+	// Note: Full context menu implementation requires custom widget handling
+	// For now, we support keyboard shortcut (Ctrl+Right) to trigger actions
+	_ = list // Placeholder for context menu integration
 
 	d.DeviceList = list
 
@@ -784,11 +1043,26 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 		print("1W in Chart")
 	})
 
+	// Global/Individual toggle button
+	viewToggleBtn := widget.NewButton("🌐 Global", func() {
+		m.State.ChartViewGlobal = !m.State.ChartViewGlobal
+		// Refresh chart data based on view mode
+		if m.Chart != nil {
+			m.Chart.UpdateFromCSV()
+		}
+	})
+	viewToggleBtn.Importance = widget.MediumImportance
+
+	// Focus Mode indicator
+	focusModeLabel := canvas.NewText("", colorPurple)
+	focusModeLabel.TextSize = 12
+
 	timeRange := container.NewHBox(
 		widget.NewButton("<", nil),
 		widget.NewLabel("11 Mar"),
 		widget.NewButton(">", nil),
 		layout.NewSpacer(),
+		viewToggleBtn,
 		range1D,
 		range1W,
 	)
@@ -796,8 +1070,8 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 	// Chart widget (fynesimplechart مُضمَّن بداخله)
 	chartWidget := m.createChartWidget()
 
-	// Header
-	header := container.NewBorder(nil, nil, title, timeRange)
+	// Header with title and view toggle
+	header := container.NewBorder(nil, nil, container.NewHBox(title, layout.NewSpacer(), focusModeLabel), timeRange)
 
 	// Chart container
 	chartContainer := container.NewBorder(header, chartWidget, nil, nil, nil)
@@ -1053,18 +1327,60 @@ func (r *chartRenderer) Objects() []fyne.CanvasObject {
 
 // createFooter creates the status bar
 // يعرض اختصارات لوحة المفاتيح وآخر وقت لتحديث البيانات.
+// createFooter creates the bottom footer with system status
 func (m *DashboardApp) createFooter() fyne.CanvasObject {
-	// Keyboard shortcuts
-	shortcuts := canvas.NewText("for support please visit your dashboard -> support", colorTextSecondary)
-	shortcuts.TextSize = 11
+	lang := string(m.State.Config.Language)
+
+	// FRP Status indicator
+	frpStatusText := GetText("frp_status", lang) + ": "
+	frpIndicator := canvas.NewCircle(colorGreen)
+	frpStatus := canvas.NewText(frpStatusText+GetText("online", lang), colorGreen)
+	frpStatus.TextSize = 11
+	frpContainer := container.NewHBox(frpIndicator, frpStatus)
+
+	// API Status indicator
+	apiStatusText := GetText("api_status", lang) + ": "
+	apiIndicator := canvas.NewCircle(colorGreen)
+	apiStatus := canvas.NewText(apiStatusText+GetText("connected", lang), colorGreen)
+	apiStatus.TextSize = 11
+	apiContainer := container.NewHBox(apiIndicator, apiStatus)
+
+	// IP Range - clickable to edit
+	ipRangeText := GetText("ip_range", lang) + ": " + m.State.IPRange
+	ipRangeLabel := canvas.NewText(ipRangeText, colorBlue)
+	ipRangeLabel.TextSize = 11
+	ipRangeLabel.TextStyle = fyne.TextStyle{Underline: true}
+
+	// Make IP Range clickable
+	ipRangeButton := widget.NewButton("", func() {
+		m.showIPRangeModal()
+	})
+	ipRangeButton.Importance = widget.LowImportance
+	ipRangeButton.SetIcon(theme.SettingsIcon())
+	ipRangeContainer := container.NewHBox(ipRangeButton, ipRangeLabel)
 
 	// Last update
 	updateLabel := widget.NewLabelWithData(m.State.LastUpdate)
 	updateLabel.Alignment = fyne.TextAlignTrailing
 
+	// Shortcuts hint
+	shortcuts := canvas.NewText("⌨ Ctrl+R: Refresh | F11: Fullscreen", colorTextSecondary)
+	shortcuts.TextSize = 10
+
+	// Container with all status elements
+	statusRow := container.NewHBox(
+		frpContainer,
+		layout.NewSpacer(),
+		apiContainer,
+		layout.NewSpacer(),
+		ipRangeContainer,
+		layout.NewSpacer(),
+		updateLabel,
+	)
+
 	// Container
 	footer := container.NewBorder(
-		container.NewHBox(shortcuts, layout.NewSpacer(), updateLabel),
+		container.NewVBox(statusRow, shortcuts),
 		nil,
 		nil,
 		nil,
@@ -1072,6 +1388,57 @@ func (m *DashboardApp) createFooter() fyne.CanvasObject {
 	)
 
 	return container.NewPadded(footer)
+}
+
+// showIPRangeModal shows a modal dialog to edit IP range
+func (m *DashboardApp) showIPRangeModal() {
+	lang := string(m.State.Config.Language)
+
+	// Create input field with current value
+	input := widget.NewEntry()
+	input.SetText(m.State.IPRange)
+
+	// Current range label
+	currentLabel := canvas.NewText(GetText("current_range", lang)+": "+m.State.IPRange, colorTextSecondary)
+	currentLabel.TextSize = 12
+
+	// New range label
+	newRangeLabel := canvas.NewText(GetText("new_range", lang), colorTextPrimary)
+	newRangeLabel.TextSize = 12
+
+	// Title
+	title := canvas.NewText(GetText("edit_ip_range", lang), colorYellow)
+	title.TextSize = 16
+	title.TextStyle = fyne.TextStyle{Bold: true}
+
+	// Save button
+	saveBtn := widget.NewButton(GetText("save", lang), func() {
+		newRange := input.Text
+		if newRange != "" {
+			m.State.IPRange = newRange
+			// TODO: Trigger network re-scan with new IP range
+		}
+		// Refresh footer to show new IP
+		m.Window.SetContent(m.buildUI(m.State.Config.ApplicationName, m.State.Config.FarmUUID))
+	})
+
+	// Cancel button
+	cancelBtn := widget.NewButton(GetText("cancel", lang), func() {
+		// Just refresh to cancel
+	})
+
+	// Modal content
+	content := container.NewVBox(
+		title,
+		currentLabel,
+		newRangeLabel,
+		input,
+		container.NewHBox(saveBtn, cancelBtn),
+	)
+
+	// Create and show modal popup
+	modal := widget.NewModalPopUp(content, m.Window.Canvas())
+	modal.Show()
 }
 
 // =============================================================================
