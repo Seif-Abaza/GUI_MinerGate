@@ -1,6 +1,49 @@
-device_log/
-cmd/minergate/device_log/
-cmd/minergate/__debug*
-build/
+```
+# Dependencies
+go.mod
 go.sum
-config.json
+
+# Compiled and build artifacts
+*.o
+*.obj
+*.out
+*.a
+*.so
+*.dll
+*.exe
+
+# Go-specific build artifacts
+bin/
+pkg/
+vendor/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Build outputs
+dist/
+build/
+target/
+```

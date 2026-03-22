@@ -819,6 +819,9 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 type ChartWidget struct {
 	widget.BaseWidget
 	mu       sync.Mutex
+	data     []float64
+	minVal   float64
+	maxVal   float64
 	inner    *fyne.Container // Stack container يحمل الرسم البياني الفعلي
 	csvPath  string
 	appState *AppState
