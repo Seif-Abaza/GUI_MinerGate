@@ -817,6 +817,7 @@ func (m *DashboardApp) createChart() fyne.CanvasObject {
 // يستخدم container.NewStack الداخلي لضمان تحديث صحيح وموثوق
 // بدلاً من custom renderer معقد.
 type ChartWidget struct {
+	widget.BaseWidget
 	mu       sync.Mutex
 	inner    *fyne.Container // Stack container يحمل الرسم البياني الفعلي
 	csvPath  string
@@ -900,6 +901,21 @@ func (m *DashboardApp) createChartWidget() fyne.CanvasObject {
 		appState: m.State,
 		csvPath:  csvPath,
 	}
+
+	var initialObj fyne.CanvasObject
+	if len(data) > 0 {
+		if gw := charts.BuildGraphWidget(data, "Hashrate (TH/s)"); gw != nil {
+			initialObj = gw
+		}
+	}
+	if initialObj == nil {
+		ph := canvas.NewText("⏳ Waiting for hashrate data...", charts.ChartLabelColor)
+		ph.TextSize = 13
+		ph.TextStyle = fyne.TextStyle{Italic: true}
+		initialObj = ph
+	}
+
+	chart.inner = container.NewStack(initialObj)
 	chart.ExtendBaseWidget(chart)
 	chart.calculateRange()
 
@@ -927,9 +943,14 @@ func (c *ChartWidget) calculateRange() {
 }
 
 func (c *ChartWidget) CreateRenderer() fyne.WidgetRenderer {
-	r := &chartRenderer{widget: c}
-	r.build()
-	return r
+	if c.inner == nil {
+		placeholder := canvas.NewText("⏳ Waiting for hashrate data...", charts.ChartLabelColor)
+		placeholder.TextSize = 13
+		placeholder.TextStyle = fyne.TextStyle{Italic: true}
+		c.inner = container.NewStack(placeholder)
+	}
+
+	return widget.NewSimpleRenderer(c.inner)
 }
 
 // =============================================================================
