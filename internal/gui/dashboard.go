@@ -499,11 +499,6 @@ func (m *DashboardApp) createTab(text string, active bool) fyne.CanvasObject {
 	return container.NewPadded(label)
 }
 
-// sin دالة جيبية مبسطة
-func sin(x float64) float64 {
-	return x - (x*x*x)/6 + (x*x*x*x*x)/120
-}
-
 // createDeviceList creates a list of devices in the sidebar area
 // يعرض قائمة بالأجهزة وعند الضغط على جهاز يحدث البيانات المعروضة.
 func (d *DashboardApp) createDeviceList() fyne.CanvasObject {
@@ -826,6 +821,9 @@ type ChartWidget struct {
 	inner    *fyne.Container // Stack container يحمل الرسم البياني الفعلي
 	csvPath  string
 	appState *AppState
+	data     []float64 // chart data
+	minVal   float64   // minimum value for Y-axis
+	maxVal   float64   // maximum value for Y-axis
 }
 
 // UpdateData يُحدّث بيانات الرسم البياني ويُعيد الرسم فوراً.
@@ -1222,7 +1220,9 @@ func (d *DashboardApp) refreshData() {
 // updateSelectedDevice يحدث بيانات الجهاز المحدد
 // يأخذ البيانات من الجهاز المحدد في القائمة ويعرضها في الواجهة.
 func (d *DashboardApp) updateSelectedDevice() {
-	// Assumes caller holds d.mu.RLock() or Lock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
 	if len(d.State.Devices) == 0 {
 		return
 	}
