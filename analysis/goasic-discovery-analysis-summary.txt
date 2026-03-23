@@ -1,0 +1,207 @@
+Inspected files:
+- internal/dbgoasic/manager.go
+- internal/dbgoasic/types.go
+- internal/dbgoasic/goasic/goasic.go
+
+Modified files:
+- None
+Created files:
+- analysis/goasic-discovery-analysis-summary.txt
+
+Key findings for parent agent:
+
+1) App-facing discovery/live-data API is `internal/dbgoasic.Manager`
+- Types:
+  - `type DeviceStatus string`
+    - `StatusOnline = "online"`
+    - `StatusOffline = "offline"`
+    - `StatusError = "error"`
+    - `StatusScanning = "scanning"`
+  - `type DiscoveredDevice struct`
+    - `IP string`
+    - `Model string`
+    - `Make string`
+    - `Status DeviceStatus`
+    - `LastSeen time.Time`
+    - `Data *models.DeviceInfo`
+
+2) Manager methods available
+- Constructor/lifecycle:
+  - `NewManager(cfg *config.Config) *Manager`
+  - `Start(ctx context.Context) error`
+  - `Stop()`
+- Discovery/polling:
+  - `ScanNetwork(ctx context.Context) error`
+- Read current devices:
+  - `GetDevices() []*DiscoveredDevice`
+  - `GetDevice(ip string) *DiscoveredDevice`
+  - `GetDeviceCount() int`
+  - `GetOnlineCount() int`
+- Reporting:
+  - `GenerateDeviceReports() []models.DeviceReport`
+- Callbacks:
+  - `OnDeviceDiscovered(func(device *DiscoveredDevice))`
+  - `OnDeviceLost(func(ip string))`
+  - `OnDeviceUpdate(func(device *DiscoveredDevice))`
+  - `OnError(func(error))`
+- Scan state:
+  - `IsScanning() bool`
+  - `GetLastScanTime() time.Time`
+
+3) Actual discovery flow in manager.go
+- `Start()` launches:
+  - `scanLoop(ctx)` for periodic subnet scans
+  - `dataCollectionLoop(ctx)` for periodic polling of already-known miners
+- `scanLoop()`:
+  - runs one immediate `ScanNetwork(ctx)`
+  - then repeats every `time.Duration(m.cfg.GoASICScanInterval) * time.Second`
+- `ScanNetwork()`:
+  - uses `scanSubnetFn(ctx, m.cfg.GoASICNetworkRange, 50)`
+  - `scanSubnetFn` defaults to `goasic.ScanSubnet`
+  - returned miners are `[]goasic.Miner`
+  - for each miner:
+    - calls `miner.GetData(ctx)`
+    - on success maps to `DiscoveredDevice`
+    - on failure still adds/updates a device using:
+      - `IP: miner.IP()`
+      - `Model: "Unknown"`
+      - `Make: "Unknown"`
+      - `Status: StatusError`
+
+4) Duplicate handling
+- Manager stores miners in `map[string]*DiscoveredDevice`
+- Uniqueness key is IP
+- `addOrUpdateDevice()` updates an existing entry when the same IP is seen again
+- For dashboard `refreshData`, IP is the correct dedupe key
+
+5) Live refresh flow
+- `dataCollectionLoop()` runs every 30s
+- `collectAllDeviceData()` polls all current devices concurrently
+- `collectDeviceData(ctx, device)`:
+  - calls `detectMinerFn(ctx, device.IP)`; default is `goasic.Detect`
+  - then `miner.GetData(ctx)`
+  - then updates existing device:
+    - `Data = convertMinerDataToDeviceInfo(data)`
+    - `LastSeen = time.Now()`
+    - `Status = StatusOnline`
+  - triggers `onDeviceUpdate`
+
+6) Callback behavior
+- `OnDeviceDiscovered`: called only when a new IP is first inserted
+- `OnDeviceUpdate`: called on updates and on live poll refresh
+- `OnError`: called for subnet scan / detect / get-data failures
+- `OnDeviceLost`: setter exists but not invoked anywhere in `manager.go`
+
+7) Underlying GoASIC package APIs from internal/dbgoasic/goasic/goasic.go
+- Aliases:
+  - `type Miner = miners.Miner`
+  - `type MinerData = miners.MinerData`
+  - `type MinerConfig = miners.MinerConfig`
+  - `type MinerSpec = minerdb.MinerSpec`
+  - `type MiningMode = miners.MiningMode`
+  - `type FirmwareInfo = miners.FirmwareInfo`
+- Functions used by manager:
+  - `Detect(ctx context.Context, ip string) (Miner, error)`
+  - `ScanSubnet(ctx context.Context, cidr string, maxConcurrent int) ([]Miner, error)`
+- Miner methods relied on by manager:
+  - `miner.IP()`
+  - `miner.GetData(ctx)`
+
+8) Fields mapped from `*goasic.MinerData` into `*models.DeviceInfo` in `convertMinerDataToDeviceInfo()`
+- `IP`
+- `Model`
+- `Make`
+- `Manufacturer` set from `data.Make`
+- `Firmware`
+- `Algorithm`
+- `Hashrate`
+- `ExpectedHR` from `ExpectedHashrate`
+- `Temperature`
+- `FanSpeeds`
+- `Wattage`
+- `WattageLimit`
+- `Efficiency`
+- `Pool1URL`
+- `Pool1User`
+- `Hostname`
+- `Errors`
+- `FaultLight`
+- `IsMining`
+- `Uptime`
+- `ChipCount`
+- `FansCount`
+- `Cooling`
+- `LastScan` set to `time.Now()`
+
+9) CSV-persistence-ready fields confirmed by internal/dbgoasic/types.go (`DeviceData`)
+- `IP string`
+- `Model string`
+- `Make string`
+- `Manufacturer string`
+- `Firmware string`
+- `Algorithm string`
+- `Hashrate float64`
+- `ExpectedHR float64`
+- `Temperature float64`
+- `Temperatures []float64`
+- `FanSpeeds []int`
+- `Wattage int`
+- `WattageLimit int`
+- `Efficiency float64`
+- `Pool1URL string`
+- `Pool1User string`
+- `Hostname string`
+- `Errors []string`
+- `ErrorCount int`
+- `FaultLight bool`
+- `IsMining bool`
+- `Uptime uint64`
+- `ChipCount int`
+- `FansCount int`
+- `Cooling string`
+- `LastScan time.Time`
+
+10) Good dashboard/CSV fields to persist from manager output
+- From `DiscoveredDevice`:
+  - IP
+  - Model
+  - Make
+  - Status
+  - LastSeen
+- From converted miner data:
+  - Manufacturer
+  - Firmware
+  - Algorithm
+  - Hostname
+  - Hashrate
+  - Expected Hashrate
+  - Temperatures / primary temperature
+  - FanSpeeds
+  - Wattage
+  - WattageLimit
+  - Efficiency
+  - Uptime
+  - IsMining
+  - FaultLight
+  - Errors
+  - ChipCount
+  - FansCount
+  - Cooling
+  - Pool1URL
+  - Pool1User
+  - LastScan
+
+11) Nil-handling caveat inferred from manager usage
+- In `GenerateDeviceReports()` these `device.Data` fields are treated as optional/pointer-like:
+  - `Hashrate`
+  - `Temperature`
+  - `Wattage`
+  - `Efficiency`
+  - `Uptime`
+- Parent agent should normalize missing values before CSV writes and before recalculating dashboard stats
+
+12) Limits / blockers
+- I did not modify source files
+- I could not directly inspect `models.DeviceInfo`, `models.DeviceReport`, or `config.Config` definitions from the available files, so exact pointer/value types are inferred from usage in `manager.go`
+- Only pool1 fields are explicitly mapped (`Pool1URL`, `Pool1User`); no pool2/pool3 mapping is present in current manager conversion
+- No explicit absent-miner offline marking is implemented during rescans; manager dedupes by IP and updates known devices, but `OnDeviceLost` is currently unused

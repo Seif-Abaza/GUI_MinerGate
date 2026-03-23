@@ -1,0 +1,124 @@
+Inspected file:
+- internal/charts/hashrate_chart.go
+
+What exists
+- The chart package already uses github.com/alexiusacademia/fynesimplechart, not raw Fyne canvas primitives.
+- Available exported APIs:
+  - ReadCSVValues(path string) []float64
+  - BuildGraphWidget(data []float64, seriesTitle string) *fynesimplechart.ScatterPlot
+  - BuildGraphWidgetFromCSV(csvPath, seriesTitle string) *fynesimplechart.ScatterPlot
+- Supporting type:
+  - type CSVRecord struct { Time time.Time; Value float64 }
+- Exported colors:
+  - ChartLineColor
+  - ChartFillColor
+  - ChartLabelColor
+
+Behavior of current chart implementation
+- ReadCSVValues:
+  - Reads CSV rows with expected format like "2006-01-02 15:04:05","110.50"
+  - Skips optional header if first column is time, timestamp, or date
+  - Sorts records by time ascending
+  - Trims to latest 288 points
+  - Returns only Y-values ([]float64), losing timestamps for axis labeling
+  - Ignores invalid rows and negative values
+- BuildGraphWidget:
+  - Converts index to X axis (x = 0..n-1)
+  - Creates one Plot
+  - Enables line and area fill
+  - Disables points
+  - Enables grid
+  - Hides legend
+  - Hardcodes YAxisTitle = "TH/s"
+- BuildGraphWidgetFromCSV:
+  - Convenience wrapper from CSV path
+
+Important implications for dashboard integration
+- There is already a reusable chart widget pattern for hashrate history from CSV.
+- Current implementation is suitable for a single-series historical chart, especially for selected miner history.
+- However, it is only partially generic:
+  - series title is configurable
+  - Y-axis title is not configurable
+  - colors are global constants
+  - timestamps are parsed but discarded
+  - X-axis is sample index, not actual time labels
+
+What can be improved for createChartsSection
+1. Reuse existing widget for hashrate directly
+- For hashrate history, the parent can use:
+  - charts.BuildGraphWidget(data, title) if data is already prepared
+  - or charts.BuildGraphWidgetFromCSV(csvPath, title) if the selected miner has a dedicated CSV history file
+- This is the fastest path.
+
+2. Temperature chart likely needs a second chart builder or a generalized API
+- Current widget hardcodes YAxisTitle = "TH/s", so it is not ideal for temperature without changes.
+- Temperature can still use the same underlying pattern, but a second helper is advisable:
+  - either a generalized builder with unit/color parameters
+  - or a dedicated BuildTemperatureGraphWidget(...)
+- If parent does not want to change internal/charts yet, they could duplicate the pattern locally, but cleaner is adding a generalized chart helper later.
+
+3. Better-looking charts in Fyne with current library
+Using the existing fynesimplechart approach, improvements can include:
+- Separate color palettes by metric:
+  - hashrate: blue/green
+  - temperature: orange/red
+- Configure Y-axis title per metric:
+  - TH/s
+  - °C
+- Keep ShowLine = true, FillArea = true for hashrate
+- For temperature, consider:
+  - line only, or lighter fill
+  - optional points for sparse data
+- Tune line width:
+  - current 2.5 is already decent
+- Show legend if multiple series are ever added:
+  - board temp vs chip temp
+  - current vs average temp
+- If library supports it elsewhere, parent should check for title/background/tick styling, but from this file only the visible API used is Plot and ScatterPlot fields listed above.
+
+4. Biggest current limitation: no time labels on X axis
+- ReadCSVValues parses timestamps but throws them away.
+- That means charts are visually fine but do not communicate real time spacing.
+- For dashboard history, this is acceptable as a sparkline/trend chart, but not ideal for analysis.
+- If improved UX is desired, the chart layer should preserve timestamps and either:
+  - use a chart widget that supports X labels/time axis, or
+  - render custom labels below the chart in the dashboard container.
+
+5. CSV format expectations
+- Existing helper assumes a simple two-column time/value CSV.
+- This is useful if the dashboard writes separate metric-history CSV files like:
+  - hashrate history CSV
+  - temperature history CSV
+- It is not directly suited to a wide all-miner-info-per-row CSV unless parent extracts metric-specific series first.
+
+Whether a second chart widget or custom canvas chart is needed
+- For hashrate only: no, current BuildGraphWidgetFromCSV is already usable.
+- For temperature: probably yes, at least a second helper or a generalized chart API is needed because of the hardcoded TH/s axis title and metric-specific styling.
+- A fully custom Fyne canvas-based chart is not strictly necessary unless the parent wants:
+  - true timestamp labels
+  - richer annotations
+  - multi-series overlays
+  - full control over theme and rendering
+- Given current project code, extending the existing fynesimplechart pattern is the lowest-risk option.
+
+Recommended direction for parent
+- Keep internal/charts/hashrate_chart.go as the chart foundation.
+- For createChartsSection:
+  - use existing builder for selected miner hashrate history from CSV
+  - add a parallel temperature chart path using the same library/pattern
+- Best future API shape in charts package:
+  - generalized builder with parameters for data, series title, y-axis title, line color, fill color
+- If parent must work without adding chart package changes immediately, they can still use existing hashrate chart now and defer temperature chart enhancement.
+
+Summary for parent agent
+- Existing reusable chart code is in internal/charts/hashrate_chart.go
+- Exported functions available:
+  - ReadCSVValues
+  - BuildGraphWidget
+  - BuildGraphWidgetFromCSV
+- Existing chart backend:
+  - github.com/alexiusacademia/fynesimplechart
+- Best improvement path:
+  - reuse current graph widget for hashrate
+  - create a second generalized or dedicated chart helper for temperature
+  - no need for a custom canvas chart unless better time-axis labeling or richer visuals are required
