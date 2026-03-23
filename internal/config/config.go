@@ -59,7 +59,7 @@ type Config struct {
 	RefreshRate    int      `json:"refresh_rate"`  // معدل التحديث بالثواني
 	Theme          string   `json:"theme"`         // السمة (dark/light)
 	WindowWidth    int      `json:"window_width"`  // عرض النافذة
-	WindowHeight int      `json:"window_height"` // ارتفاع النافذة
+	WindowHeight   int      `json:"window_height"` // ارتفاع النافذة
 
 	// إعدادات API
 	APIEndpoint     string `json:"api_endpoint"`      // نقطة نهاية API الرئيسية
@@ -139,14 +139,14 @@ func NewConfigManager(configPath string) *ConfigManager {
 // getDefaultConfig يعيد الإعدادات الافتراضية
 func getDefaultConfig() *Config {
 	return &Config{
-		ApplicationName:   "MinerGate",
-		FarmUUID:          "12345678-90ab-cdef-1234-567890abcdef",
-		Language:          LangEnglish,
-		AutoRefresh:       true,
-		RefreshRate:       10,
-		Theme:             "dark",
-		WindowWidth:       1400,
-		WindowHeight:      900,
+		ApplicationName:    "MinerGate",
+		FarmUUID:           "12345678-90ab-cdef-1234-567890abcdef",
+		Language:           LangEnglish,
+		AutoRefresh:        true,
+		RefreshRate:        10,
+		Theme:              "dark",
+		WindowWidth:        1400,
+		WindowHeight:       900,
 		APIEndpoint:        "http://[IP_ADDRESS]/api/v1",
 		APITargetDevice:    "http://[IP_ADDRESS]/api/v1/devices/report",
 		APITimeout:         30,

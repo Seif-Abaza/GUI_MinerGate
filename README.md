@@ -1,4 +1,4 @@
-# MinerGate Dashboard v1.0.3
+# MinerGate Dashboard v1.0.4
 
 Professional Mining Dashboard GUI for cryptocurrency mining operations.
 
